@@ -19,7 +19,7 @@ async def start(bot: Client, message: Message):
 
     await bot_db.add_user(user_id)
 
-    if Telegram.START_PIC:
+    if getattr(Telegram, "START_PIC", None):
         await message.reply_photo(
             photo=Telegram.START_PIC,
             caption=LANG.START_TEXT.format(message.from_user.mention, FileStream.username),
