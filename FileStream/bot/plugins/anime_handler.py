@@ -99,6 +99,36 @@ async def anime_file_handler(bot: Client, message: Message):
     original_name  = _get_field(message, "file_name") or "video.mp4"
     user_id        = message.from_user.id
 
+    # ── Duplicate guard ──────────────────────────────────────────────────────
+    existing_anime_id = await site_db.get_or_create_anime(anime_name, slug)
+    existing_qualities = await site_db.get_episode_qualities(slug, season, episode)
+    existing = next(
+        (q for q in existing_qualities
+         if q["audio_type"] == audio_type and q["quality"] == quality),
+        None,
+    )
+    if existing:
+        base = Server.URL.rstrip("/")
+        stream_url = "{}/stream/{}".format(base, existing["stream_token"])
+        player_url = "{}/player/{}".format(base, existing["stream_token"])
+        await message.reply_text(
+            "⚠️ <b>Already exists — no duplicate uploaded.</b>\n\n"
+            "<b>Anime:</b> {}\n"
+            "<b>Season {} | Episode {}</b>\n"
+            "<b>Type:</b> {} | <b>Quality:</b> {}\n\n"
+            "<b>Player URL:</b>\n<code>{}</code>\n\n"
+            "<b>Stream URL:</b>\n<code>{}</code>".format(
+                anime_name, season, episode,
+                audio_type.upper(), quality,
+                player_url, stream_url
+            ),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+            quote=True,
+        )
+        return
+    # ────────────────────────────────────────────────────────────────────────
+
     status_msg = await message.reply_text(
         f"⬇️ <b>Downloading…</b>\n"
         f"<code>[{'░' * BAR_LEN}]</code> 0%\n"

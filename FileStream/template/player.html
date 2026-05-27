@@ -114,6 +114,10 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 }
 @keyframes fadeInOverlay{from{opacity:0}to{opacity:1}}
 #next-ep-overlay.show{display:flex}
+#next-ep-info{
+  font-size:13px;color:rgba(255,255,255,.6);
+  text-align:center;max-width:260px;line-height:1.5;
+}
 #btn-next-ep{
   display:flex;align-items:center;gap:10px;
   padding:14px 28px;cursor:pointer;pointer-events:all;
@@ -137,6 +141,13 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 #btn-replay:hover{background:rgba(255,255,255,.12);transform:scale(1.03)}
 #btn-replay svg{width:16px;height:16px;fill:#ccc}
 
+/* ── Autoplay countdown ── */
+#autoplay-bar{
+  position:absolute;bottom:0;left:0;right:0;height:3px;
+  background:var(--gold);transform-origin:left;transform:scaleX(0);
+  transition:none;z-index:56;display:none;
+}
+
 /* ── Controls bar ── */
 #ctrl{
   position:absolute;bottom:0;left:0;right:0;
@@ -147,6 +158,17 @@ video{width:100%;height:100%;object-fit:contain;display:block}
   opacity:0;transition:opacity .22s;pointer-events:none;z-index:30;
 }
 #W.show-ui #ctrl{opacity:1;pointer-events:all}
+
+/* Episode title bar */
+#ep-title{
+  position:absolute;top:0;left:0;right:0;
+  padding:10px 14px;
+  background:linear-gradient(180deg,rgba(0,0,0,.80) 0%,transparent 100%);
+  font-size:13px;color:rgba(255,255,255,.85);font-weight:500;
+  opacity:0;transition:opacity .22s;pointer-events:none;z-index:30;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#W.show-ui #ep-title{opacity:1}
 
 /* Seek */
 #seek-row{display:flex;align-items:center;gap:8px;width:100%}
@@ -185,8 +207,10 @@ video{width:100%;height:100%;object-fit:contain;display:block}
   width:152px;height:86px;
   background:#111 no-repeat center/cover;
   border:2px solid var(--gold);border-radius:5px;
+  overflow:hidden;
 }
-#sp-img.hidden{display:none}
+#sp-img img{width:100%;height:100%;object-fit:cover;display:block}
+#sp-img.no-thumb img{display:none}
 #sp-time{
   font-size:11px;color:#fff;
   background:rgba(0,0,0,.82);padding:2px 8px;border-radius:4px;
@@ -246,6 +270,8 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 .qb{font-size:10px;padding:2px 5px;border-radius:3px;
   background:rgba(201,162,39,.16);color:var(--gold);
   text-transform:uppercase;letter-spacing:.5px}
+.qi-check{margin-left:auto;width:14px;height:14px;fill:var(--gold2);flex-shrink:0;display:none}
+.qi.cur .qi-check{display:block}
 
 /* Panels */
 .panel{
@@ -322,7 +348,11 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 <body>
 <div id="W">
 
-  <video id="V" preload="auto" playsinline></video>
+  <video id="V" preload="auto" playsinline
+    {% if poster_url %}poster="{{ poster_url }}"{% endif %}></video>
+
+  <!-- Episode title -->
+  <div id="ep-title">{{ anime_name }} · S{{ '%02d'|format(season) }}E{{ '%02d'|format(episode) }} · {{ audio_type|upper }}</div>
 
   <!-- Double-tap ripples -->
   <div class="dtap-ripple" id="dtap-left">
@@ -362,6 +392,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 
   <!-- Next episode overlay -->
   <div id="next-ep-overlay">
+    <div id="next-ep-info"></div>
     <button id="btn-next-ep">
       <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm8.5-6L23 6v12l-8.5-6z"/></svg>
       Next Episode
@@ -371,6 +402,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
       Replay
     </button>
   </div>
+  <div id="autoplay-bar"></div>
 
   <!-- Subtitle box -->
   <div id="sub-box"><span id="sub-text"></span></div>
@@ -437,7 +469,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
       <span class="tt" id="tc">0:00</span>
       <div id="seek">
         <div id="seek-preview">
-          <div id="sp-img"></div>
+          <div id="sp-img"><img id="sp-poster" src="" alt=""></div>
           <div id="sp-time">0:00</div>
         </div>
         <div id="seek-bg">
@@ -513,7 +545,21 @@ const toast = (msg, ms = 2200) => {
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 };
 
-/* ── Thumbnail VTT ── */
+/* ── Seek preview poster (shows poster image while hovering seek bar) ── */
+const SeekPoster = {
+  _url: null,
+  init(url) {
+    this._url = url;
+    const img = $('sp-poster');
+    if (img && url) { img.src = url; }
+  },
+  apply(el) {
+    if (!this._url) { el.classList.add('no-thumb'); return; }
+    el.classList.remove('no-thumb');
+  }
+};
+
+/* ── Thumbnail VTT (sprite sheets) ── */
 const Thumb = {
   cues: [],
   load(url) {
@@ -543,8 +589,11 @@ const Thumb = {
   },
   apply(t, el) {
     const c = this.cues.find(c => t >= c.st && t <= c.et);
-    if (!c) { el.classList.add('hidden'); return; }
-    el.classList.remove('hidden');
+    if (!c) {
+      SeekPoster.apply(el);
+      return;
+    }
+    el.classList.remove('no-thumb');
     el.style.backgroundImage = `url('${c.url}')`;
     if (c.w) {
       el.style.backgroundPosition = `-${c.x}px -${c.y}px`;
@@ -629,6 +678,7 @@ class Player {
     this._wasPaused = false;
     this._actx = this._gain = this._asrc = null;
     this._skipShown = null;
+    this._autoplayTimer = null;
 
     this._buildQ();
     this._loadSrc(0);
@@ -641,6 +691,7 @@ class Player {
 
     if (MAL_ID) this._fetchSkip();
     if (ED.thumbnails_url) Thumb.load(ED.thumbnails_url);
+    if (ED.poster_url) SeekPoster.init(ED.poster_url);
     emit('ready', {});
   }
 
@@ -661,8 +712,15 @@ class Player {
     this.qualities.forEach((q, i) => {
       const el = document.createElement('div');
       el.className = 'qi' + (i === this.qIdx ? ' cur' : '');
-      el.innerHTML = `<span>${q.quality.toUpperCase()}</span><span class="qb">${q.audio_type}</span>`;
-      el.onclick = e => { e.stopPropagation(); this.setQuality(i); dd.classList.remove('open'); };
+      el.innerHTML =
+        `<span>${q.quality.toUpperCase()}</span>` +
+        `<span class="qb">${q.audio_type}</span>` +
+        `<svg class="qi-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`;
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        this.setQuality(i);
+        dd.classList.remove('open');
+      });
       dd.appendChild(el);
     });
     const q = this.qualities[this.qIdx];
@@ -743,10 +801,55 @@ class Player {
     V.addEventListener('pause',    () => { this._syncPlay(); emit('pause', {}); });
     V.addEventListener('ended',    () => {
       this._syncPlay();
-      $('next-ep-overlay').classList.add('show');
+      this._onEnded();
       emit('ended', {});
-      if (this.autoplay) emit('requestnext', {});
     });
+  }
+
+  _onEnded() {
+    const overlay = $('next-ep-overlay');
+    const nextToken = ED.next_token;
+
+    if (nextToken) {
+      // Build info text
+      const info = `${ED.anime_name} · S${String(ED.season).padStart(2,'0')}E${String(ED.episode + 1).padStart(2,'0')}`;
+      $('next-ep-info').textContent = info;
+    } else {
+      $('next-ep-info').textContent = 'No next episode available.';
+    }
+
+    overlay.classList.add('show');
+
+    if (this.autoplay && nextToken) {
+      this._startAutoplay(nextToken);
+    } else {
+      emit('requestnext', {});
+    }
+  }
+
+  _startAutoplay(nextToken) {
+    clearTimeout(this._autoplayTimer);
+    const bar = $('autoplay-bar');
+    bar.style.display = 'block';
+    bar.style.transition = 'none';
+    bar.style.transform = 'scaleX(0)';
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        bar.style.transition = 'transform 5s linear';
+        bar.style.transform = 'scaleX(1)';
+      });
+    });
+    this._autoplayTimer = setTimeout(() => {
+      bar.style.display = 'none';
+      $('next-ep-overlay').classList.remove('show');
+      window.location.href = BASE + '/player/' + nextToken;
+    }, 5000);
+  }
+
+  _cancelAutoplay() {
+    clearTimeout(this._autoplayTimer);
+    const bar = $('autoplay-bar');
+    bar.style.display = 'none';
   }
 
   _syncPlay() {
@@ -763,7 +866,7 @@ class Player {
     $('vol-ind-icon').setAttribute('d', d);
   }
 
-  /* ── Seek bar (mouse + pointer) ── */
+  /* ── Seek bar ── */
   _bindSeek() {
     const sb = $('seek-bg'), sw = $('seek');
     const prev = $('seek-preview'), pimg = $('sp-img'), ptime = $('sp-time');
@@ -843,6 +946,7 @@ class Player {
     /* Click on wrapper = play/pause (not on controls/panels/buttons) */
     W.addEventListener('click', e => {
       if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay')) return;
+      this._closePanels(null);
       this._togglePlay();
       const f = $('flash'), p = $('flash-path');
       p.setAttribute('d', V.paused ? 'M8 5v14l11-7z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
@@ -864,17 +968,25 @@ class Player {
     const vs = $('vol-sl');
     vs.addEventListener('input', () => this.setVol(+vs.value));
 
-    $('skip-btn').onclick = () => {
+    $('skip-btn').onclick = e => {
+      e.stopPropagation();
       const s = this.skipTimes.find(x => V.currentTime >= x.startTime && V.currentTime < x.endTime);
       if (s) this._doSkip(s);
     };
 
-    /* Quality */
+    /* Quality dropdown — stopPropagation so document click doesn't close it */
     const ql = $('q-lbl'), qd = $('q-dd');
-    ql.onclick = e => { e.stopPropagation(); qd.classList.toggle('open'); this._closePanels('q-dd'); };
+    ql.addEventListener('click', e => {
+      e.stopPropagation();
+      const wasOpen = qd.classList.contains('open');
+      this._closePanels(null);
+      if (!wasOpen) qd.classList.add('open');
+    });
+    qd.addEventListener('click', e => e.stopPropagation());
 
     /* CC */
-    $('btn-cc').onclick = () => {
+    $('btn-cc').onclick = e => {
+      e.stopPropagation();
       this.ccOn = !this.ccOn;
       $('btn-cc').classList.toggle('on', this.ccOn);
       if (!this.ccOn) $('sub-text').textContent = '';
@@ -882,40 +994,46 @@ class Player {
     };
 
     /* PiP */
-    $('btn-pip').onclick = async () => {
+    $('btn-pip').onclick = async e => {
+      e.stopPropagation();
       if (!document.pictureInPictureEnabled) { toast('PiP not supported'); return; }
       document.pictureInPictureElement
         ? await document.exitPictureInPicture()
         : await V.requestPictureInPicture().catch(() => toast('PiP failed'));
     };
 
-    /* Settings */
-    $('btn-set').onclick = e => {
+    /* Settings — stopPropagation prevents document click from instantly closing */
+    $('btn-set').addEventListener('click', e => {
       e.stopPropagation();
-      $('settings-panel').classList.toggle('open');
-      this._closePanels('settings-panel');
-    };
-    $('open-cc').onclick = e => {
+      const wasOpen = $('settings-panel').classList.contains('open');
+      this._closePanels(null);
+      if (!wasOpen) $('settings-panel').classList.add('open');
+    });
+    $('settings-panel').addEventListener('click', e => e.stopPropagation());
+
+    $('open-cc').addEventListener('click', e => {
       e.stopPropagation();
       $('settings-panel').classList.remove('open');
       $('cc-panel').classList.add('open');
-    };
-    $('cc-back').onclick = e => {
+    });
+    $('cc-back').addEventListener('click', e => {
       e.stopPropagation();
       $('cc-panel').classList.remove('open');
       $('settings-panel').classList.add('open');
-    };
+    });
+    $('cc-panel').addEventListener('click', e => e.stopPropagation());
+
     ['cc-size','cc-color','cc-bgop','cc-font','cc-pos'].forEach(id =>
       $(id).addEventListener('input', () => CCM.sync()));
     $('cc-track').onchange = e => CCM.setActive(+e.target.value);
 
-    $('tog-autoskip').onclick = () => this.setAutoskip(!this.autoskip);
-    $('tog-autoplay').onclick = () => this.setAutoplay(!this.autoplay);
+    $('tog-autoskip').onclick = e => { e.stopPropagation(); this.setAutoskip(!this.autoskip); };
+    $('tog-autoplay').onclick = e => { e.stopPropagation(); this.setAutoplay(!this.autoplay); };
     $('inp-pad').onchange = e => { this.skipPad = parseFloat(e.target.value) || 0; };
     $('sel-speed').onchange = e => { V.playbackRate = +e.target.value; emit('speedchange', { speed: V.playbackRate }); };
 
     /* Fullscreen */
-    $('btn-fs').onclick = () => this._toggleFS();
+    $('btn-fs').onclick = e => { e.stopPropagation(); this._toggleFS(); };
     document.addEventListener('fullscreenchange', () => {
       $('fs-ico').setAttribute('d', document.fullscreenElement
         ? 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z'
@@ -923,19 +1041,33 @@ class Player {
     });
 
     /* Next ep overlay */
-    $('btn-next-ep').onclick = () => {
+    $('btn-next-ep').onclick = e => {
+      e.stopPropagation();
+      this._cancelAutoplay();
       $('next-ep-overlay').classList.remove('show');
-      emit('requestnext', {});
+      if (ED.next_token) {
+        window.location.href = BASE + '/player/' + ED.next_token;
+      } else {
+        emit('requestnext', {});
+      }
     };
-    $('btn-replay').onclick = () => {
+    $('btn-replay').onclick = e => {
+      e.stopPropagation();
+      this._cancelAutoplay();
       $('next-ep-overlay').classList.remove('show');
       V.currentTime = 0; V.play().catch(() => {});
     };
 
-    /* Close on outside click */
-    document.addEventListener('click', () => {
-      qd.classList.remove('open');
-      $('settings-panel').classList.remove('open');
+    /* ── FIXED: Close panels only on genuine outside click ── */
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#q-wrap')) {
+        $('q-dd').classList.remove('open');
+      }
+      if (!e.target.closest('#settings-panel') && !e.target.closest('#btn-set') &&
+          !e.target.closest('#cc-panel') && !e.target.closest('#open-cc')) {
+        $('settings-panel').classList.remove('open');
+        $('cc-panel').classList.remove('open');
+      }
     });
   }
 
@@ -945,23 +1077,33 @@ class Player {
     let showTimer;
 
     /* Show controls on touch */
-    W.addEventListener('touchstart', () => {
+    W.addEventListener('touchstart', e => {
+      /* Don't interfere with panel interactions */
+      if (e.target.closest('.panel,#q-dd,#q-wrap,#btn-set,#skip-btn,#next-ep-overlay,#ctrl')) return;
       W.classList.add('show-ui');
       clearTimeout(showTimer);
       showTimer = setTimeout(() => { if (!V.paused) W.classList.remove('show-ui'); }, 3500);
+    }, { passive: true });
+
+    /* Close panels on touch outside (but not on controls) */
+    W.addEventListener('touchstart', e => {
+      if (!e.target.closest('#q-wrap,#q-dd')) $('q-dd').classList.remove('open');
+      if (!e.target.closest('#settings-panel,#btn-set,#cc-panel,#open-cc,#cc-back')) {
+        $('settings-panel').classList.remove('open');
+        $('cc-panel').classList.remove('open');
+      }
     }, { passive: true });
 
     /* Double-tap seek */
     let lastTap = 0, lastSide = null;
     W.addEventListener('touchend', e => {
       if (this._seekDrag) return;
+      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay,#btn-set,#q-wrap')) return;
       const touch = e.changedTouches[0];
       const ww = window.innerWidth;
       const x = touch.clientX, y = touch.clientY;
 
       if (y >= $('ctrl').getBoundingClientRect().top) return;
-      if ($('skip-btn').getBoundingClientRect().left <= x &&
-          $('skip-btn').style.display !== 'none') return;
 
       const now = Date.now();
       const side = x < ww * 0.38 ? 'left' : x > ww * 0.62 ? 'right' : 'center';
@@ -984,6 +1126,7 @@ class Player {
     /* Swipe up/down (center) = volume */
     let sy = null, sv = null, swiping = false;
     W.addEventListener('touchstart', e => {
+      if (e.target.closest('#ctrl,.panel,#q-dd,#next-ep-overlay')) return;
       const t = e.touches[0];
       const ww = window.innerWidth;
       if (t.clientX < ww * 0.38 || t.clientX > ww * 0.62) return;
@@ -1028,6 +1171,7 @@ class Player {
         case 'f': this._toggleFS(); break;
         case 'm': V.muted = !V.muted; this._syncVol(); break;
         case 'c': $('btn-cc').click(); break;
+        case 'Escape': this._closePanels(null); break;
         case 'i': case 'o': {
           const s = this.skipTimes.find(x => V.currentTime >= x.startTime && V.currentTime < x.endTime);
           if (s) this._doSkip(s); break;
@@ -1100,6 +1244,7 @@ class Player {
   setQuality(idx) {
     if (idx < 0 || idx >= this.qualities.length) return;
     this.qIdx = idx; this._loadSrc(idx);
+    toast('Quality: ' + this.qualities[idx].quality.toUpperCase());
   }
 
   setAutoskip(v) { this.autoskip = !!v; $('tog-autoskip').className = 'tog' + (v ? ' on' : ''); }

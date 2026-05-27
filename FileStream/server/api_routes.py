@@ -81,13 +81,32 @@ async def player_handler(request: web.Request):
         ep["anime_slug"], ep["season"], ep["episode"]
     )
 
+    # Build next-episode token if one exists
+    next_token = None
+    try:
+        all_eps = await site_db.get_episodes_for_anime(ep["anime_slug"], ep["season"])
+        # Find the next episode number (same audio_type preferred)
+        next_ep_num = ep["episode"] + 1
+        next_candidates = [
+            e for e in all_eps
+            if e["episode"] == next_ep_num and e["audio_type"] == ep["audio_type"]
+        ]
+        if not next_candidates:
+            next_candidates = [e for e in all_eps if e["episode"] == next_ep_num]
+        if next_candidates:
+            next_token = next_candidates[0]["stream_token"]
+    except Exception:
+        pass
+
     episode_data = {
-        "anime_name": ep["anime_name"],
-        "slug":       ep["anime_slug"],
-        "season":     ep["season"],
-        "episode":    ep["episode"],
-        "audio_type": ep["audio_type"],
-        "qualities":  qualities,
+        "anime_name":  ep["anime_name"],
+        "slug":        ep["anime_slug"],
+        "season":      ep["season"],
+        "episode":     ep["episode"],
+        "audio_type":  ep["audio_type"],
+        "qualities":   qualities,
+        "next_token":  next_token,
+        "poster_url":  "/poster/" + token,
     }
 
     try:
@@ -103,8 +122,51 @@ async def player_handler(request: web.Request):
         audio_type   = ep["audio_type"],
         episode_json = json.dumps(episode_data),
         mal_id       = mal_id_val,
+        poster_url   = "/poster/" + token,
     )
     return web.Response(text=html, content_type="text/html")
+
+
+@routes.get("/poster/{token}", allow_head=True)
+async def poster_handler(request: web.Request):
+    """Serve the video thumbnail/poster image from the Telegram dump message."""
+    token = request.match_info["token"]
+    try:
+        ep = await site_db.get_episode_by_token(token)
+        if not ep or not ep.get("dump_msg_id") or not ep.get("dump_channel_id"):
+            raise web.HTTPNotFound()
+
+        index = min(work_loads, key=work_loads.get)
+        client = multi_clients[index]
+
+        msg = await client.get_messages(ep["dump_channel_id"], ep["dump_msg_id"])
+        if not msg:
+            raise web.HTTPNotFound()
+
+        media = getattr(msg, "video", None) or getattr(msg, "document", None)
+        if not media:
+            raise web.HTTPNotFound()
+
+        thumbs = getattr(media, "thumbs", None)
+        if not thumbs:
+            raise web.HTTPNotFound()
+
+        # Pick the largest thumbnail
+        thumb = max(thumbs, key=lambda t: getattr(t, "width", 0) * getattr(t, "height", 0))
+        data = await client.download_media(thumb.file_id, in_memory=True)
+        if not data:
+            raise web.HTTPNotFound()
+
+        return web.Response(
+            body=bytes(data),
+            content_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
+    except web.HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Poster fetch failed for %s: %s", token, e)
+        raise web.HTTPNotFound()
 
 
 @routes.get("/api/aniskip", allow_head=True)

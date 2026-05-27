@@ -1,6 +1,6 @@
 """
-ffmpeg watermark pipeline — Tsukuyomi watermark, top-right, small, semi-transparent.
-Downloads from Telegram, burns watermark, re-uploads to dump channel.
+ffmpeg watermark pipeline — Tsukuyomi watermark injected as metadata.
+Uses stream copy (no re-encoding) to preserve original quality.
 """
 import os
 import asyncio
@@ -13,25 +13,18 @@ logger = logging.getLogger(__name__)
 
 
 def _build_ffmpeg_cmd(input_path: str, output_path: str):
-    # Small, clean watermark — fontsize 20, opacity 0.38, top-right corner
-    drawtext = (
-        "drawtext=text='Tsukuyomi'"
-        ":fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-        ":fontsize=20"
-        ":fontcolor=white@0.38"
-        ":x=w-tw-14"
-        ":y=12"
-        ":shadowcolor=black@0.4"
-        ":shadowx=1:shadowy=1"
-    )
+    """
+    Stream-copy both video and audio — zero quality loss.
+    Injects a Tsukuyomi metadata title tag as the 'watermark'.
+    This is the only approach that avoids any re-encoding quality drop.
+    """
     return [
         "ffmpeg", "-y",
         "-i", input_path,
-        "-vf", drawtext,
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "18",          # higher quality (was 22)
+        "-c:v", "copy",
         "-c:a", "copy",
+        "-metadata", "title=Tsukuyomi",
+        "-metadata", "comment=Tsukuyomi Streaming",
         "-movflags", "+faststart",
         output_path
     ]
@@ -39,7 +32,7 @@ def _build_ffmpeg_cmd(input_path: str, output_path: str):
 
 def _run_ffmpeg(input_path: str, output_path: str) -> bool:
     cmd = _build_ffmpeg_cmd(input_path, output_path)
-    logger.info("ffmpeg watermark: %s → %s", input_path, output_path)
+    logger.info("ffmpeg remux: %s → %s", input_path, output_path)
     try:
         result = subprocess.run(
             cmd,
@@ -55,7 +48,7 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
         logger.error("ffmpeg timed out")
         return False
     except FileNotFoundError:
-        logger.error("ffmpeg not found")
+        logger.error("ffmpeg not found — uploading original")
         return False
 
 
@@ -68,7 +61,8 @@ async def apply_watermark_and_upload(
     progress_cb=None,
 ) -> Tuple[Optional[int], Optional[str]]:
     """
-    Download → watermark → upload to dump channel.
+    Download → remux with faststart → upload to dump channel.
+    No re-encoding: original quality is fully preserved.
     progress_cb(current, total) called during download if provided.
     Returns (message_id, file_id) or (None, None) on failure.
     """
@@ -76,8 +70,10 @@ async def apply_watermark_and_upload(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         safe_name = original_file_name.replace("/", "_").replace("\\", "_")
+        if not safe_name.lower().endswith(".mp4"):
+            safe_name += ".mp4"
         raw_path = os.path.join(tmpdir, "raw_" + safe_name)
-        wm_path  = os.path.join(tmpdir, "wm_"  + safe_name)
+        out_path  = os.path.join(tmpdir, "out_"  + safe_name)
 
         logger.info("Downloading: %s", original_file_name)
         try:
@@ -93,8 +89,8 @@ async def apply_watermark_and_upload(
             logger.error("Download returned no file")
             return None, None
 
-        ok = await loop.run_in_executor(None, _run_ffmpeg, dl_path, wm_path)
-        upload_path = wm_path if (ok and os.path.exists(wm_path)) else dl_path
+        ok = await loop.run_in_executor(None, _run_ffmpeg, dl_path, out_path)
+        upload_path = out_path if (ok and os.path.exists(out_path)) else dl_path
 
         logger.info("Uploading to dump channel %s", dump_channel_id)
         try:
