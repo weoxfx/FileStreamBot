@@ -4,110 +4,40 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>{{ anime_name }} · S{{ '%02d'|format(season) }}E{{ '%02d'|format(episode) }} · Tsukuyomi</title>
+<title>Tsukuyomi</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --gold:#C9A227;--gold2:#FFD700;--gold3:#8a6e0f;
-  --glass:rgba(8,6,0,.65);--glass2:rgba(10,8,0,.92);
-  --bd:rgba(201,162,39,.22);--dark:#07060d;--r:9px;--ctrl:#ddd;
+  --glass:rgba(8,6,0,.72);--glass2:rgba(10,8,0,.94);
+  --bd:rgba(201,162,39,.22);--dark:#07060d;--r:9px;
 }
 html,body{width:100%;height:100%;background:#000;overflow:hidden;
   font-family:'Segoe UI',system-ui,sans-serif;color:#eee}
 
-/* ── Wrapper ── */
 #W{position:relative;width:100vw;height:100dvh;display:flex;
   align-items:center;justify-content:center;background:#000;
   cursor:none;user-select:none;-webkit-user-select:none}
-#W.show-ui{cursor:default}
+#W.ui{cursor:default}
 
 video{position:absolute;inset:0;width:100%;height:100%;
   object-fit:contain;display:block;z-index:1}
 
-/* ── Intro overlay (shown before first play) ── */
-#intro{
-  position:absolute;inset:0;z-index:20;
-  display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:0;
-  cursor:pointer;
+/* ── Mute banner ── */
+#mute-bar{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  display:flex;align-items:center;gap:10px;
+  padding:14px 28px;
+  background:var(--glass2);border:1.5px solid var(--gold);
+  backdrop-filter:blur(20px);border-radius:12px;
+  color:var(--gold2);font-size:15px;font-weight:700;
+  cursor:pointer;z-index:40;
+  transition:opacity .3s,transform .3s;
+  box-shadow:0 8px 40px rgba(0,0,0,.6);
 }
-#intro-bg{
-  position:absolute;inset:0;background:#000;
-  transition:opacity .5s;
-}
-#intro-poster{
-  position:absolute;inset:0;
-  background:center/cover no-repeat #000;
-  opacity:0;transition:opacity .6s;
-}
-#intro-vignette{
-  position:absolute;inset:0;
-  background:linear-gradient(to top,
-    rgba(0,0,0,.95) 0%,
-    rgba(0,0,0,.55) 40%,
-    rgba(0,0,0,.35) 100%);
-}
-#intro-content{
-  position:relative;z-index:2;
-  display:flex;flex-direction:column;
-  align-items:center;gap:18px;
-  padding:0 20px;max-width:640px;text-align:center;
-}
-#intro-meta{
-  font-size:12px;color:var(--gold);letter-spacing:1.5px;
-  text-transform:uppercase;font-weight:600;
-  opacity:.85;
-}
-#intro-title{
-  font-size:clamp(18px,4vw,32px);font-weight:700;
-  color:#fff;line-height:1.2;
-  text-shadow:0 2px 20px rgba(0,0,0,.8);
-}
-#intro-play{
-  width:72px;height:72px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  background:var(--gold);
-  box-shadow:0 0 0 0 rgba(201,162,39,.5);
-  animation:pulse 2.2s infinite;
-  transition:transform .2s,box-shadow .2s;
-  flex-shrink:0;margin-top:4px;
-}
-#intro-play:hover{transform:scale(1.1);animation:none;
-  box-shadow:0 0 40px rgba(201,162,39,.6)}
-#intro-play svg{width:28px;height:28px;fill:#000;margin-left:4px}
-#intro-hint{
-  font-size:11px;color:rgba(255,255,255,.45);
-  letter-spacing:.5px;
-}
-@keyframes pulse{
-  0%{box-shadow:0 0 0 0 rgba(201,162,39,.5)}
-  70%{box-shadow:0 0 0 18px rgba(201,162,39,0)}
-  100%{box-shadow:0 0 0 0 rgba(201,162,39,0)}
-}
-#intro.hidden{display:none}
-
-/* ── Skip intro ── */
-#skip-btn{
-  position:absolute;bottom:90px;right:16px;
-  display:none;align-items:center;gap:7px;
-  padding:9px 18px;z-index:50;pointer-events:all;
-  background:var(--glass);border:1.5px solid var(--gold);
-  backdrop-filter:blur(14px);border-radius:8px;
-  color:var(--gold2);font-size:14px;font-weight:700;cursor:pointer;
-  transition:background .18s,transform .12s;
-}
-#skip-btn:hover{background:rgba(201,162,39,.18);transform:scale(1.03)}
-#skip-btn svg{width:16px;height:16px;fill:var(--gold2);flex-shrink:0}
-
-/* ── Toast ── */
-#toast{
-  position:absolute;top:12px;left:50%;transform:translateX(-50%);
-  padding:5px 16px;background:var(--glass);border:1px solid var(--gold);
-  backdrop-filter:blur(12px);border-radius:6px;
-  font-size:12px;color:var(--gold2);pointer-events:none;
-  opacity:0;z-index:80;transition:opacity .2s;white-space:nowrap;
-}
-#toast.show{opacity:1}
+#mute-bar svg{width:20px;height:20px;fill:var(--gold2);flex-shrink:0}
+#mute-bar.gone{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.92)}
 
 /* ── Spinner ── */
 #spinner{
@@ -116,6 +46,16 @@ video{position:absolute;inset:0;width:100%;height:100%;
 }
 #spinner svg{width:46px;height:46px;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Toast ── */
+#toast{
+  position:absolute;top:14px;left:50%;transform:translateX(-50%);
+  padding:6px 18px;background:var(--glass);border:1px solid var(--gold);
+  backdrop-filter:blur(12px);border-radius:6px;
+  font-size:12px;color:var(--gold2);pointer-events:none;
+  opacity:0;z-index:80;transition:opacity .2s;white-space:nowrap;
+}
+#toast.show{opacity:1}
 
 /* ── Center flash ── */
 #flash{
@@ -131,224 +71,167 @@ video{position:absolute;inset:0;width:100%;height:100%;
 #flash.go{animation:flashAnim .36s ease-out forwards}
 
 /* ── Double-tap ripples ── */
-.dtap-ripple{
-  position:absolute;top:50%;transform:translateY(-50%);
+.dtap{position:absolute;top:50%;transform:translateY(-50%);
   pointer-events:none;z-index:20;display:flex;flex-direction:column;
-  align-items:center;gap:6px;opacity:0;
-}
-#dtap-left{left:18%}
-#dtap-right{right:18%}
-.dtap-ripple .circle{
-  width:70px;height:70px;border-radius:50%;
-  background:rgba(255,255,255,.16);border:2px solid rgba(255,255,255,.3);
-  display:flex;align-items:center;justify-content:center;
-}
-.dtap-ripple .circle svg{width:26px;height:26px;fill:#fff}
-.dtap-ripple .label{font-size:11px;font-weight:700;color:#fff;
-  text-shadow:0 1px 4px #000}
-@keyframes dtapAnim{
-  0%{opacity:.9;transform:translateY(-50%) scale(.8)}
-  60%{opacity:.7;transform:translateY(-50%) scale(1.05)}
-  100%{opacity:0;transform:translateY(-50%) scale(1.2)}
-}
-.dtap-ripple.go{animation:dtapAnim .5s ease-out forwards}
+  align-items:center;gap:6px;opacity:0}
+#dtap-l{left:16%}#dtap-r{right:16%}
+.dtap .ring{width:68px;height:68px;border-radius:50%;
+  background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.28);
+  display:flex;align-items:center;justify-content:center}
+.dtap .ring svg{width:26px;height:26px;fill:#fff}
+.dtap .lbl{font-size:11px;font-weight:700;color:#fff;text-shadow:0 1px 4px #000}
+@keyframes dtapA{0%{opacity:.85;transform:translateY(-50%) scale(.8)}
+  60%{opacity:.65;transform:translateY(-50%) scale(1.05)}
+  100%{opacity:0;transform:translateY(-50%) scale(1.2)}}
+.dtap.go{animation:dtapA .5s ease-out forwards}
 
-/* ── Volume swipe indicator ── */
-#vol-indicator{
-  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+/* ── Vol swipe ── */
+#vi{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   display:flex;flex-direction:column;align-items:center;gap:4px;
   background:var(--glass2);border:1px solid var(--bd);
   backdrop-filter:blur(14px);border-radius:10px;
-  padding:12px 20px;z-index:45;pointer-events:none;
-  opacity:0;transition:opacity .15s;
-}
-#vol-indicator.show{opacity:1}
-#vol-indicator svg{width:22px;height:22px;fill:var(--gold2)}
-#vol-indicator span{font-size:14px;color:var(--gold2);font-weight:700}
+  padding:12px 20px;z-index:45;pointer-events:none;opacity:0;transition:opacity .15s}
+#vi.show{opacity:1}
+#vi svg{width:22px;height:22px;fill:var(--gold2)}
+#vi span{font-size:14px;color:var(--gold2);font-weight:700}
 
-/* ── Next episode overlay ── */
-#next-ep-overlay{
-  position:absolute;inset:0;display:none;
+/* ── Skip btn ── */
+#skip{
+  position:absolute;bottom:92px;right:16px;
+  display:none;align-items:center;gap:7px;
+  padding:9px 18px;z-index:50;
+  background:var(--glass);border:1.5px solid var(--gold);
+  backdrop-filter:blur(14px);border-radius:8px;
+  color:var(--gold2);font-size:14px;font-weight:700;cursor:pointer;
+  transition:background .18s,transform .12s;
+}
+#skip:hover{background:rgba(201,162,39,.18);transform:scale(1.03)}
+#skip svg{width:16px;height:16px;fill:var(--gold2);flex-shrink:0}
+
+/* ── Next-ep overlay ── */
+#nxt{position:absolute;inset:0;display:none;
   align-items:center;justify-content:center;
   flex-direction:column;gap:16px;z-index:55;
-  background:linear-gradient(135deg,rgba(0,0,0,.65) 0%,rgba(7,6,13,.55) 100%);
-  backdrop-filter:blur(2px);
-}
-@keyframes fadeInOverlay{from{opacity:0}to{opacity:1}}
-#next-ep-overlay.show{display:flex;animation:fadeInOverlay .4s ease}
-#next-ep-info{
-  font-size:13px;color:rgba(255,255,255,.6);
-  text-align:center;max-width:260px;line-height:1.5;
-}
-#btn-next-ep{
-  display:flex;align-items:center;gap:10px;
-  padding:14px 28px;cursor:pointer;pointer-events:all;
+  background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+#nxt.show{display:flex;animation:fadeIn .4s ease}
+#nxt-info{font-size:13px;color:rgba(255,255,255,.6);text-align:center;max-width:260px;line-height:1.5}
+#btn-nxt{display:flex;align-items:center;gap:10px;padding:14px 28px;cursor:pointer;
   background:var(--glass);border:1.5px solid var(--gold);
   backdrop-filter:blur(20px);border-radius:10px;
   color:var(--gold2);font-size:16px;font-weight:700;
-  transition:background .18s,transform .15s,box-shadow .15s;
-  box-shadow:0 0 24px rgba(201,162,39,.15);
-}
-#btn-next-ep:hover{background:rgba(201,162,39,.18);transform:scale(1.04);
-  box-shadow:0 0 36px rgba(201,162,39,.3)}
-#btn-next-ep svg{width:22px;height:22px;fill:var(--gold2)}
-#btn-replay{
-  display:flex;align-items:center;gap:8px;
-  padding:9px 18px;cursor:pointer;pointer-events:all;
+  transition:background .18s,transform .15s;box-shadow:0 0 24px rgba(201,162,39,.15)}
+#btn-nxt:hover{background:rgba(201,162,39,.18);transform:scale(1.04)}
+#btn-nxt svg{width:22px;height:22px;fill:var(--gold2)}
+#btn-rpl{display:flex;align-items:center;gap:8px;padding:9px 18px;cursor:pointer;
   background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);
-  backdrop-filter:blur(14px);border-radius:8px;
-  color:#ccc;font-size:13px;
-  transition:background .15s,transform .12s;
-}
-#btn-replay:hover{background:rgba(255,255,255,.12);transform:scale(1.03)}
-#btn-replay svg{width:16px;height:16px;fill:#ccc}
-
-/* ── Autoplay countdown bar ── */
-#autoplay-bar{
-  position:absolute;bottom:0;left:0;right:0;height:3px;
+  backdrop-filter:blur(14px);border-radius:8px;color:#ccc;font-size:13px;
+  transition:background .15s,transform .12s}
+#btn-rpl:hover{background:rgba(255,255,255,.12);transform:scale(1.03)}
+#btn-rpl svg{width:16px;height:16px;fill:#ccc}
+#ap-bar{position:absolute;bottom:0;left:0;right:0;height:3px;
   background:var(--gold);transform-origin:left;transform:scaleX(0);
-  transition:none;z-index:56;display:none;
-}
+  transition:none;z-index:56;display:none}
 
-/* ── Controls bar ── */
+/* ── Controls ── */
 #ctrl{
   position:absolute;bottom:0;left:0;right:0;
-  padding:0 12px 14px;
-  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,transparent 100%);
-  display:flex;flex-direction:column;gap:6px;
+  padding:0 14px 16px;
+  background:linear-gradient(0deg,rgba(0,0,0,.92) 0%,transparent 100%);
+  display:flex;flex-direction:column;gap:8px;
   opacity:0;transition:opacity .22s;pointer-events:none;z-index:30;
 }
-#W.show-ui #ctrl{opacity:1;pointer-events:all}
+#W.ui #ctrl{opacity:1;pointer-events:all}
 
-/* Episode title bar */
-#ep-title{
-  position:absolute;top:0;left:0;right:0;
-  padding:12px 16px;
-  background:linear-gradient(180deg,rgba(0,0,0,.82) 0%,transparent 100%);
-  font-size:13px;color:rgba(255,255,255,.88);font-weight:500;
-  opacity:0;transition:opacity .22s;pointer-events:none;z-index:30;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  letter-spacing:.2px;
-}
-#W.show-ui #ep-title{opacity:1}
+/* ── Seek ── */
+#seek-row{display:flex;align-items:center;gap:10px;width:100%}
+.tt{font-size:12px;color:rgba(255,255,255,.7);white-space:nowrap;min-width:42px;text-align:center;
+  font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
 
-/* Seek */
-#seek-row{display:flex;align-items:center;gap:8px;width:100%}
-.tt{font-size:12px;color:#bbb;white-space:nowrap;min-width:38px;text-align:center}
-
-#seek{
-  flex:1;height:28px;display:flex;align-items:center;
-  cursor:pointer;position:relative;touch-action:none;
-}
-#seek-bg{width:100%;height:4px;background:rgba(255,255,255,.14);
-  border-radius:4px;position:relative;}
-#seek-buf,#seek-fill{
-  position:absolute;left:0;top:0;height:100%;
-  border-radius:4px;pointer-events:none;
-}
-#seek-buf{background:rgba(201,162,39,.25);width:0}
-#seek-fill{background:var(--gold);width:0;
-  box-shadow:0 0 6px rgba(201,162,39,.4)}
-#seek-thumb{
-  position:absolute;top:50%;
+#seek{flex:1;height:32px;display:flex;align-items:center;cursor:pointer;
+  position:relative;touch-action:none}
+#seek-bg{width:100%;height:4px;background:rgba(255,255,255,.12);
+  border-radius:4px;position:relative;transition:height .15s}
+#seek:hover #seek-bg,#seek.active #seek-bg{height:6px}
+#seek-buf,#seek-fill{position:absolute;left:0;top:0;height:100%;border-radius:4px;pointer-events:none}
+#seek-buf{background:rgba(201,162,39,.22);width:0}
+#seek-fill{background:var(--gold);width:0;box-shadow:0 0 6px rgba(201,162,39,.35)}
+#seek-thumb{position:absolute;top:50%;
   width:14px;height:14px;background:var(--gold2);border-radius:50%;
-  transform:translate(-50%,-50%) scale(0);
-  transition:transform .12s;pointer-events:none;
-  box-shadow:0 0 8px var(--gold);
-}
+  transform:translate(-50%,-50%) scale(0);transition:transform .12s;pointer-events:none;
+  box-shadow:0 0 8px var(--gold)}
 #seek:hover #seek-thumb,#seek.active #seek-thumb{transform:translate(-50%,-50%) scale(1)}
 
 /* Seek preview */
-#seek-preview{
-  position:absolute;bottom:calc(100% + 14px);
-  transform:translateX(-50%);
-  pointer-events:none;z-index:70;
-  display:none;flex-direction:column;align-items:center;gap:4px;
-}
-#seek-preview.show{display:flex}
-#sp-img{
-  width:152px;height:86px;
-  background:#111 no-repeat center/cover;
-  border:2px solid var(--gold);border-radius:6px;
-  overflow:hidden;
-  box-shadow:0 4px 20px rgba(0,0,0,.6);
-}
+#sp{position:absolute;bottom:calc(100% + 16px);transform:translateX(-50%);
+  pointer-events:none;z-index:70;display:none;flex-direction:column;align-items:center;gap:4px}
+#sp.show{display:flex}
+#sp-img{width:152px;height:86px;background:#111 no-repeat center/cover;
+  border:2px solid var(--gold);border-radius:6px;overflow:hidden;
+  box-shadow:0 4px 20px rgba(0,0,0,.6)}
 #sp-img img{width:100%;height:100%;object-fit:cover;display:block}
-#sp-img.no-thumb img{display:none}
-#sp-time{
-  font-size:11px;color:#fff;
-  background:rgba(0,0,0,.85);padding:2px 8px;border-radius:4px;
-}
+#sp-img.no-th img{display:none}
+#sp-t{font-size:11px;color:#fff;background:rgba(0,0,0,.85);padding:2px 8px;border-radius:4px}
 
 /* Buttons row */
-#btn-row{display:flex;align-items:center;gap:1px;width:100%;flex-wrap:nowrap}
-.cb{
-  background:none;border:none;color:var(--ctrl);cursor:pointer;
-  width:38px;height:38px;
-  display:flex;align-items:center;justify-content:center;
+#btn-row{display:flex;align-items:center;gap:2px;width:100%;flex-wrap:nowrap}
+.cb{background:none;border:none;color:rgba(255,255,255,.85);cursor:pointer;
+  width:38px;height:38px;display:flex;align-items:center;justify-content:center;
   border-radius:7px;flex-shrink:0;position:relative;
   transition:background .14s,color .14s;
-  -webkit-tap-highlight-color:transparent;touch-action:manipulation;
-}
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .cb:hover{background:rgba(201,162,39,.13);color:var(--gold2)}
 .cb.on{color:var(--gold2)}
 .cb svg{width:20px;height:20px;fill:currentColor;pointer-events:none}
 .sp{flex:1}
 
+/* Tooltip */
+.cb::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 5px);left:50%;
+  transform:translateX(-50%);background:rgba(0,0,0,.84);color:#eee;font-size:11px;
+  padding:3px 8px;border-radius:4px;white-space:nowrap;pointer-events:none;
+  opacity:0;transition:opacity .14s}
+.cb:hover::after{opacity:1}
+
 /* Volume */
 #vol-wrap{display:flex;align-items:center;gap:4px;flex-shrink:0}
-#vol-sl{
-  -webkit-appearance:none;width:70px;height:4px;border-radius:4px;
-  background:linear-gradient(to right,var(--gold) var(--p,50%),rgba(255,255,255,.16) var(--p,50%));
-  outline:none;cursor:pointer;
-}
-#vol-sl::-webkit-slider-thumb{
-  -webkit-appearance:none;width:12px;height:12px;border-radius:50%;
-  background:var(--gold2);box-shadow:0 0 4px var(--gold);
-}
+#vol-sl{-webkit-appearance:none;width:72px;height:4px;border-radius:4px;
+  background:linear-gradient(to right,var(--gold) var(--p,50%),rgba(255,255,255,.14) var(--p,50%));
+  outline:none;cursor:pointer}
+#vol-sl::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
+  border-radius:50%;background:var(--gold2);box-shadow:0 0 4px var(--gold)}
 
 /* Quality */
 #q-wrap{position:relative;flex-shrink:0}
-#q-lbl{
-  padding:4px 10px;border:1px solid var(--bd);border-radius:5px;
+#q-lbl{padding:4px 10px;border:1px solid var(--bd);border-radius:5px;
   background:var(--glass);color:var(--gold2);
-  font-size:12px;font-weight:700;cursor:pointer;user-select:none;
-  -webkit-tap-highlight-color:transparent;letter-spacing:.3px;
-}
-#q-dd{
-  display:none;position:absolute;bottom:calc(100% + 6px);right:0;
+  font-size:11px;font-weight:700;cursor:pointer;user-select:none;
+  -webkit-tap-highlight-color:transparent;letter-spacing:.3px}
+#q-dd{display:none;position:absolute;bottom:calc(100% + 8px);right:0;
   background:var(--glass2);border:1px solid var(--bd);
   backdrop-filter:blur(18px);border-radius:var(--r);
-  min-width:165px;overflow:hidden;z-index:65;
-  box-shadow:0 8px 32px rgba(0,0,0,.6);
-}
+  min-width:170px;overflow:hidden;z-index:65;
+  box-shadow:0 8px 32px rgba(0,0,0,.6)}
 #q-dd.open{display:block}
-.qi{
-  padding:10px 14px;font-size:13px;cursor:pointer;
+.qi{padding:10px 14px;font-size:13px;cursor:pointer;
   display:flex;align-items:center;gap:8px;
   border-bottom:1px solid rgba(201,162,39,.07);transition:background .1s;
-  -webkit-tap-highlight-color:transparent;
-}
+  -webkit-tap-highlight-color:transparent}
 .qi:last-child{border:none}
 .qi:hover,.qi:active{background:rgba(201,162,39,.13)}
 .qi.cur{color:var(--gold2);font-weight:600}
 .qb{font-size:10px;padding:2px 5px;border-radius:3px;
-  background:rgba(201,162,39,.16);color:var(--gold);
-  text-transform:uppercase;letter-spacing:.5px}
-.qi-check{margin-left:auto;width:14px;height:14px;fill:var(--gold2);flex-shrink:0;display:none}
-.qi.cur .qi-check{display:block}
+  background:rgba(201,162,39,.16);color:var(--gold);text-transform:uppercase}
+.qi-chk{margin-left:auto;width:14px;height:14px;fill:var(--gold2);flex-shrink:0;display:none}
+.qi.cur .qi-chk{display:block}
 
 /* Panels */
-.panel{
-  display:none;position:absolute;
+.panel{display:none;position:absolute;
   background:var(--glass2);border:1px solid var(--bd);
   backdrop-filter:blur(20px);border-radius:var(--r);
   padding:14px 16px;z-index:60;pointer-events:all;min-width:240px;
-  box-shadow:0 8px 40px rgba(0,0,0,.7);
-}
+  box-shadow:0 8px 40px rgba(0,0,0,.7)}
 .panel.open{display:block}
-#settings-panel,#cc-panel{bottom:74px;right:12px}
-
+#pnl-set,#pnl-cc{bottom:76px;right:14px}
 .ph{font-size:11px;color:var(--gold);text-transform:uppercase;
   letter-spacing:.8px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
 .sr{display:flex;align-items:center;justify-content:space-between;
@@ -370,90 +253,58 @@ video{position:absolute;inset:0;width:100%;height:100%;
 .cc-back svg{width:14px;height:14px;fill:var(--gold)}
 
 /* Subtitles */
-#sub-box{
-  position:absolute;bottom:90px;left:50%;transform:translateX(-50%);
-  text-align:center;pointer-events:none;z-index:28;max-width:92%;
-}
-#sub-text{
-  display:inline;font-size:22px;color:#fff;
+#sub-box{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);
+  text-align:center;pointer-events:none;z-index:28;max-width:92%}
+#sub-txt{display:inline;font-size:22px;color:#fff;
   background:rgba(0,0,0,.76);padding:3px 8px;border-radius:4px;
-  line-height:1.55;white-space:pre-wrap;text-shadow:0 1px 3px #000;
-}
+  line-height:1.55;white-space:pre-wrap;text-shadow:0 1px 3px #000}
 
-/* Tooltips */
-.cb::after{
-  content:attr(data-tip);
-  position:absolute;bottom:calc(100% + 5px);left:50%;transform:translateX(-50%);
-  background:rgba(0,0,0,.84);color:#eee;font-size:11px;
-  padding:3px 8px;border-radius:4px;white-space:nowrap;pointer-events:none;
-  opacity:0;transition:opacity .14s;
-}
-.cb:hover::after{opacity:1}
-
-/* ── Mobile ── */
+/* Mobile */
 @media(max-width:640px),(pointer:coarse){
-  #skip-btn{bottom:82px;right:10px;font-size:13px;padding:8px 14px}
-  #ctrl{padding:0 8px 12px;gap:3px}
-  .tt{font-size:11px;min-width:30px}
+  #skip{bottom:84px;right:10px;font-size:13px;padding:8px 14px}
+  #ctrl{padding:0 8px 12px;gap:4px}
+  .tt{font-size:11px;min-width:34px}
   #seek{height:36px}
-  #seek-bg{height:5px}
-  #seek-thumb{width:16px;height:16px}
   .cb{width:40px;height:40px}
   .cb svg{width:22px;height:22px}
   .cb::after{display:none}
   #vol-sl{width:56px}
-  #sub-box{bottom:74px}
-  #sub-text{font-size:17px}
-  .panel{left:8px;right:8px;min-width:unset;bottom:70px}
+  #sub-box{bottom:76px}
+  #sub-txt{font-size:17px}
+  .panel{left:8px;right:8px;min-width:unset;bottom:72px}
   #sp-img{width:120px;height:68px}
-  #sp-time{font-size:10px}
-  #btn-next-ep{font-size:14px;padding:12px 22px}
-  #intro-play{width:62px;height:62px}
-  #intro-play svg{width:24px;height:24px}
 }
 </style>
 </head>
 <body>
 <div id="W">
 
-  <video id="V" preload="none" playsinline></video>
+  <video id="V" preload="auto" playsinline autoplay muted></video>
 
-  <!-- Intro overlay — shown before first play -->
-  <div id="intro">
-    <div id="intro-bg"></div>
-    <div id="intro-poster"></div>
-    <div id="intro-vignette"></div>
-    <div id="intro-content">
-      <div id="intro-meta">Season {{ '%02d'|format(season) }} &nbsp;·&nbsp; Episode {{ '%02d'|format(episode) }} &nbsp;·&nbsp; {{ audio_type|upper }}</div>
-      <div id="intro-title">{{ anime_name }}</div>
-      <div id="intro-play">
-        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-      </div>
-      <div id="intro-hint">TAP TO PLAY</div>
-    </div>
+  <!-- Mute banner (shown until user interacts) -->
+  <div id="mute-bar">
+    <svg viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"/></svg>
+    Tap to unmute
   </div>
 
-  <!-- Episode title (shown in player while playing) -->
-  <div id="ep-title">{{ anime_name }} &nbsp;·&nbsp; S{{ '%02d'|format(season) }}E{{ '%02d'|format(episode) }} &nbsp;·&nbsp; {{ audio_type|upper }}</div>
-
-  <!-- Double-tap ripples -->
-  <div class="dtap-ripple" id="dtap-left">
-    <div class="circle"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg></div>
-    <span class="label">-10s</span>
+  <!-- Ripples -->
+  <div class="dtap" id="dtap-l">
+    <div class="ring"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg></div>
+    <span class="lbl">-10s</span>
   </div>
-  <div class="dtap-ripple" id="dtap-right">
-    <div class="circle"><svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg></div>
-    <span class="label">+10s</span>
+  <div class="dtap" id="dtap-r">
+    <div class="ring"><svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg></div>
+    <span class="lbl">+10s</span>
   </div>
 
-  <!-- Volume indicator -->
-  <div id="vol-indicator">
-    <svg id="vol-ind-icon" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
-    <span id="vol-ind-val">100%</span>
+  <!-- Volume swipe indicator -->
+  <div id="vi">
+    <svg id="vi-ico" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+    <span id="vi-val">100%</span>
   </div>
 
-  <!-- Skip -->
-  <div id="skip-btn">
+  <!-- Skip intro/outro -->
+  <div id="skip">
     <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm8.5-6L23 6v12l-8.5-6z"/></svg>
     <span id="skip-lbl">Skip Intro</span>
   </div>
@@ -461,7 +312,7 @@ video{position:absolute;inset:0;width:100%;height:100%;
   <!-- Toast -->
   <div id="toast"></div>
 
-  <!-- Spinner (shown while buffering after first play) -->
+  <!-- Spinner -->
   <div id="spinner">
     <svg viewBox="0 0 24 24" fill="none" stroke="#C9A227" stroke-width="2.5">
       <circle cx="12" cy="12" r="10" stroke-opacity=".18"/>
@@ -470,39 +321,39 @@ video{position:absolute;inset:0;width:100%;height:100%;
   </div>
 
   <!-- Flash -->
-  <div id="flash"><svg viewBox="0 0 24 24"><path id="flash-path" d="M8 5v14l11-7z"/></svg></div>
+  <div id="flash"><svg viewBox="0 0 24 24"><path id="flash-p" d="M8 5v14l11-7z"/></svg></div>
 
   <!-- Next episode overlay -->
-  <div id="next-ep-overlay">
-    <div id="next-ep-info"></div>
-    <button id="btn-next-ep">
+  <div id="nxt">
+    <div id="nxt-info"></div>
+    <button id="btn-nxt">
       <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm8.5-6L23 6v12l-8.5-6z"/></svg>
       Next Episode
     </button>
-    <button id="btn-replay">
+    <button id="btn-rpl">
       <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
       Replay
     </button>
   </div>
-  <div id="autoplay-bar"></div>
+  <div id="ap-bar"></div>
 
-  <!-- Subtitle box -->
-  <div id="sub-box"><span id="sub-text"></span></div>
+  <!-- Subtitles -->
+  <div id="sub-box"><span id="sub-txt"></span></div>
 
   <!-- Settings panel -->
-  <div class="panel" id="settings-panel">
+  <div class="panel" id="pnl-set">
     <div class="ph">Settings</div>
     <div class="sr">
-      <span class="sl">Playback speed</span>
-      <select class="ssel" id="sel-speed">
+      <span class="sl">Speed</span>
+      <select class="ssel" id="sel-spd">
         <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
         <option value="0.75">0.75×</option><option value="1" selected>1×</option>
         <option value="1.25">1.25×</option><option value="1.5">1.5×</option>
         <option value="1.75">1.75×</option><option value="2">2×</option>
       </select>
     </div>
-    <div class="sr"><span class="sl">Autoskip intros</span><div class="tog on" id="tog-autoskip"></div></div>
-    <div class="sr"><span class="sl">Autoplay next</span><div class="tog" id="tog-autoplay"></div></div>
+    <div class="sr"><span class="sl">Autoskip intros</span><div class="tog on" id="tog-skip"></div></div>
+    <div class="sr"><span class="sl">Autoplay next</span><div class="tog" id="tog-ap"></div></div>
     <div class="sr">
       <span class="sl">Skip padding (s)</span>
       <input class="snum" type="number" id="inp-pad" value="2" min="0" max="10">
@@ -514,21 +365,21 @@ video{position:absolute;inset:0;width:100%;height:100%;
   </div>
 
   <!-- CC panel -->
-  <div class="panel" id="cc-panel">
+  <div class="panel" id="pnl-cc">
     <div class="cc-back" id="cc-back">
       <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-      Back to Settings
+      Back
     </div>
-    <div class="ph">Subtitle Settings</div>
+    <div class="ph">Subtitles</div>
     <div class="sr"><span class="sl">Track</span>
       <select class="ssel" id="cc-track"><option value="-1">Off</option></select></div>
-    <div class="sr"><span class="sl">Font size</span>
-      <select class="ssel" id="cc-size">
+    <div class="sr"><span class="sl">Size</span>
+      <select class="ssel" id="cc-sz">
         <option value="14">Small</option><option value="18">Normal</option>
         <option value="22" selected>Medium</option><option value="28">Large</option><option value="34">XL</option>
       </select></div>
     <div class="sr"><span class="sl">Color</span>
-      <input type="color" id="cc-color" value="#ffffff"
+      <input type="color" id="cc-col" value="#ffffff"
         style="width:36px;height:24px;border:1px solid var(--bd);border-radius:4px;background:none;cursor:pointer"></div>
     <div class="sr"><span class="sl">BG opacity</span>
       <input class="snum" type="number" id="cc-bgop" value="75" min="0" max="100"></div>
@@ -545,14 +396,14 @@ video{position:absolute;inset:0;width:100%;height:100%;
       </select></div>
   </div>
 
-  <!-- Controls -->
+  <!-- Controls bar -->
   <div id="ctrl">
     <div id="seek-row">
       <span class="tt" id="tc">0:00</span>
       <div id="seek">
-        <div id="seek-preview">
+        <div id="sp">
           <div id="sp-img"><img id="sp-poster" src="" alt=""></div>
-          <div id="sp-time">0:00</div>
+          <div id="sp-t">0:00</div>
         </div>
         <div id="seek-bg">
           <div id="seek-buf"></div>
@@ -579,20 +430,19 @@ video{position:absolute;inset:0;width:100%;height:100%;
         </button>
         <input type="range" id="vol-sl" min="0" max="200" value="100">
       </div>
-      <span id="ts" style="font-size:11px;color:#888;white-space:nowrap;padding:0 4px;flex-shrink:0">0:00 / 0:00</span>
       <div class="sp"></div>
-      <button class="cb" id="btn-cc" data-tip="Subtitles (C)">
-        <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-9 9H9.5v-.5h-2v3h2V15H11v1H7V9h4v1H9.5v.5H11v1.5zm7 0h-1.5v-.5h-2v3h2V15H18v1h-4V9h4v1h-1.5v.5H18v1.5z"/></svg>
-      </button>
       <div id="q-wrap">
         <div id="q-lbl">—</div>
         <div id="q-dd"></div>
       </div>
+      <button class="cb" id="btn-cc" data-tip="Subtitles (C)">
+        <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-9 8H9.5v-.5h-2v3h2V14H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V14H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z"/></svg>
+      </button>
       <button class="cb" id="btn-pip" data-tip="Picture-in-Picture">
         <svg viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.99 2 1.99h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16.01H3V4.99h18v14.02z"/></svg>
       </button>
       <button class="cb" id="btn-set" data-tip="Settings">
-        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.04-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.04.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
       </button>
       <button class="cb" id="btn-fs" data-tip="Fullscreen (F)">
         <svg viewBox="0 0 24 24"><path id="fs-ico" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
@@ -602,164 +452,196 @@ video{position:absolute;inset:0;width:100%;height:100%;
 
 </div>
 <script>
-/* ── Injected data ── */
+/* ═══════════════════════════════════════════════════════════
+   Injected data
+═══════════════════════════════════════════════════════════ */
 const ED     = {{ episode_json | safe }};
 const MAL_ID = {{ mal_id }};
 const BASE   = window.location.origin;
 
-/* ── Helpers ── */
+/* ═══════════════════════════════════════════════════════════
+   Helpers
+═══════════════════════════════════════════════════════════ */
 const fmt = s => {
   if (!isFinite(s)) return '0:00';
   s = Math.floor(s);
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
-    : `${m}:${String(sec).padStart(2,'0')}`;
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return h ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+           : `${m}:${String(sec).padStart(2,'0')}`;
 };
 const $ = id => document.getElementById(id);
-const emit = (name, detail) => window.dispatchEvent(new CustomEvent('player:' + name, { detail }));
+const emit = (name, detail) =>
+  window.dispatchEvent(new CustomEvent('player:'+name, {detail, bubbles:false}));
 
-let toastTimer;
-const toast = (msg, ms = 2200) => {
-  const el = $('toast');
-  el.textContent = msg; el.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+let _toastT;
+const toast = (msg, ms=2200) => {
+  const el=$('toast');
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(_toastT);
+  _toastT=setTimeout(()=>el.classList.remove('show'),ms);
 };
 
-/* ── Seek preview: poster image (lazy, non-blocking) ── */
-const SeekPoster = {
-  _loaded: false,
-  init(url) {
-    if (!url) return;
-    const img = new Image();
-    img.onload = () => {
-      const el = $('sp-poster');
-      if (el) { el.src = url; this._loaded = true; }
-      const bg = $('intro-poster');
-      if (bg) { bg.style.backgroundImage = `url('${url}')`; bg.style.opacity = '1'; }
+/* ═══════════════════════════════════════════════════════════
+   Seek poster (lazy)
+═══════════════════════════════════════════════════════════ */
+const Poster = {
+  _ok:false,
+  init(url){
+    if(!url)return;
+    const img=new Image();
+    img.onload=()=>{
+      const el=$('sp-poster');
+      if(el){el.src=url;this._ok=true;}
     };
-    img.src = url;
+    img.src=url;
   },
-  apply(el) {
-    if (!this._loaded) { el.classList.add('no-thumb'); return; }
-    el.classList.remove('no-thumb');
+  apply(el){
+    this._ok ? el.classList.remove('no-th') : el.classList.add('no-th');
   }
 };
 
-/* ── Thumbnail VTT ── */
+/* ═══════════════════════════════════════════════════════════
+   Thumbnail VTT
+═══════════════════════════════════════════════════════════ */
 const Thumb = {
-  cues: [],
-  load(url) {
-    fetch(url).then(r => r.text()).then(txt => { this.cues = this._parse(txt, url); }).catch(() => {});
+  cues:[],
+  load(url){
+    fetch(url).then(r=>r.text()).then(t=>{this.cues=this._parse(t,url);}).catch(()=>{});
   },
-  _parse(txt, base) {
-    const dir = base.substring(0, base.lastIndexOf('/') + 1);
-    const toSec = s => {
-      const p = s.trim().split(':');
-      return p.length === 3 ? +p[0] * 3600 + +p[1] * 60 + parseFloat(p[2]) : +p[0] * 60 + parseFloat(p[1]);
-    };
-    return txt.split(/\n\n+/).reduce((acc, b) => {
-      const lines = b.trim().split('\n');
-      const i = lines.findIndex(l => l.includes('-->'));
-      if (i < 0) return acc;
-      const [st, et] = lines[i].split('-->').map(toSec);
-      const raw = lines.slice(i + 1).join('').trim();
-      if (!raw) return acc;
-      const m = raw.match(/#xywh=(\d+),(\d+),(\d+),(\d+)/);
-      const imgUrl = m ? raw.split('#')[0] : raw;
-      const url = imgUrl.startsWith('http') ? imgUrl : dir + imgUrl;
-      acc.push({ st, et, url, x: m ? +m[1] : 0, y: m ? +m[2] : 0, w: m ? +m[3] : 0, h: m ? +m[4] : 0 });
-      return acc;
-    }, []);
+  _parse(txt,base){
+    const dir=base.substring(0,base.lastIndexOf('/')+1);
+    const toS=s=>{const p=s.trim().split(':');return p.length===3?+p[0]*3600+(+p[1])*60+parseFloat(p[2]):(+p[0])*60+parseFloat(p[1]);};
+    return txt.split(/\n\n+/).reduce((a,b)=>{
+      const lines=b.trim().split('\n'),i=lines.findIndex(l=>l.includes('-->'));
+      if(i<0)return a;
+      const[st,et]=lines[i].split('-->').map(toS);
+      const raw=lines.slice(i+1).join('').trim();
+      if(!raw)return a;
+      const m=raw.match(/#xywh=(\d+),(\d+),(\d+),(\d+)/);
+      const imgUrl=m?raw.split('#')[0]:raw;
+      const url=imgUrl.startsWith('http')?imgUrl:dir+imgUrl;
+      a.push({st,et,url,x:m?+m[1]:0,y:m?+m[2]:0,w:m?+m[3]:0,h:m?+m[4]:0});
+      return a;
+    },[]);
   },
-  apply(t, el) {
-    const c = this.cues.find(c => t >= c.st && t <= c.et);
-    if (!c) { SeekPoster.apply(el); return; }
-    el.classList.remove('no-thumb');
-    el.style.backgroundImage = `url('${c.url}')`;
-    if (c.w) {
-      el.style.backgroundPosition = `-${c.x}px -${c.y}px`;
-      el.style.backgroundSize = 'auto';
-    } else {
-      el.style.backgroundPosition = 'center';
-      el.style.backgroundSize = 'cover';
-    }
+  apply(t,el){
+    const c=this.cues.find(c=>t>=c.st&&t<=c.et);
+    if(!c){Poster.apply(el);return;}
+    el.classList.remove('no-th');
+    el.style.backgroundImage=`url('${c.url}')`;
+    if(c.w){el.style.backgroundPosition=`-${c.x}px -${c.y}px`;el.style.backgroundSize='auto';}
+    else{el.style.backgroundPosition='center';el.style.backgroundSize='cover';}
   }
 };
 
-/* ── Subtitle manager ── */
+/* ═══════════════════════════════════════════════════════════
+   VTT subtitle parser
+═══════════════════════════════════════════════════════════ */
+function parseVTT(txt){
+  return txt.split(/\n\n+/).reduce((a,b)=>{
+    const lines=b.trim().split('\n'),i=lines.findIndex(l=>l.includes('-->'));
+    if(i<0)return a;
+    const toS=s=>{const p=s.trim().replace(',','.').split(':');return p.length===3?+p[0]*3600+(+p[1])*60+parseFloat(p[2]):(+p[0])*60+parseFloat(p[1]);};
+    const[start,end]=lines[i].split('-->').map(toS);
+    const text=lines.slice(i+1).join('\n').replace(/<[^>]+>/g,'').trim();
+    if(text)a.push({start,end,text});
+    return a;
+  },[]);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Subtitle manager (CCM)
+═══════════════════════════════════════════════════════════ */
 const CCM = {
-  tracks: [], idx: -1,
-  cfg: { size: 22, color: '#ffffff', bgOp: 75, font: "'Segoe UI',sans-serif", pos: 'bottom' },
-  add(label, lang, url) {
-    const i = this.tracks.length;
-    this.tracks.push({ label, lang, url, cues: [] });
-    fetch(url).then(r => r.text()).then(txt => { this.tracks[i].cues = parseVTT(txt); });
-    const sel = $('cc-track'), o = document.createElement('option');
-    o.value = i; o.textContent = `${label} (${lang})`; sel.appendChild(o);
+  tracks:[],idx:-1,
+  cfg:{size:22,color:'#ffffff',bgOp:75,font:"'Segoe UI',sans-serif",pos:'bottom'},
+  add(label,lang,url){
+    const i=this.tracks.length;
+    this.tracks.push({label,lang,url,cues:[]});
+    fetch(url).then(r=>r.text()).then(t=>{this.tracks[i].cues=parseVTT(t);});
+    const sel=$('cc-track'),o=document.createElement('option');
+    o.value=i;o.textContent=`${label} (${lang})`;sel.appendChild(o);
+    emit('cctrack',{index:i,label,lang});
     return i;
   },
-  setActive(i) { this.idx = parseInt(i); $('cc-track').value = i; emit('ccchange', { index: i }); },
-  render(t) {
-    const span = $('sub-text');
-    if (this.idx < 0 || !P.ccOn) { span.textContent = ''; return; }
-    const trk = this.tracks[this.idx];
-    if (!trk) { span.textContent = ''; return; }
-    const cue = trk.cues.find(c => t >= c.start && t <= c.end);
-    span.textContent = cue ? cue.text : '';
-    const s = this.cfg;
-    span.style.cssText = `font-size:${s.size}px;color:${s.color};font-family:${s.font};` +
-      `background:rgba(0,0,0,${(s.bgOp / 100).toFixed(2)})`;
-    $('sub-box').style.cssText = s.pos === 'top'
-      ? 'bottom:auto;top:54px;left:50%;transform:translateX(-50%)'
-      : 'top:auto;bottom:90px;left:50%;transform:translateX(-50%)';
+  setActive(i){
+    this.idx=parseInt(i);$('cc-track').value=i;
+    emit('ccchange',{index:i});
   },
-  sync() {
-    this.cfg.size  = +$('cc-size').value;
-    this.cfg.color = $('cc-color').value;
+  render(t){
+    const span=$('sub-txt');
+    if(this.idx<0||!P.ccOn){span.textContent='';return;}
+    const trk=this.tracks[this.idx];
+    if(!trk){span.textContent='';return;}
+    const cue=trk.cues.find(c=>t>=c.start&&t<=c.end);
+    span.textContent=cue?cue.text:'';
+    const s=this.cfg;
+    span.style.cssText=`font-size:${s.size}px;color:${s.color};font-family:${s.font};background:rgba(0,0,0,${(s.bgOp/100).toFixed(2)})`;
+    $('sub-box').style.cssText=s.pos==='top'
+      ?'bottom:auto;top:54px;left:50%;transform:translateX(-50%)'
+      :'top:auto;bottom:90px;left:50%;transform:translateX(-50%)';
+  },
+  sync(){
+    this.cfg.size  = +$('cc-sz').value;
+    this.cfg.color = $('cc-col').value;
     this.cfg.bgOp  = +$('cc-bgop').value;
     this.cfg.font  = $('cc-font').value;
     this.cfg.pos   = $('cc-pos').value;
-    emit('ccsettings', { cfg: this.cfg });
+    emit('ccsettings',{cfg:this.cfg});
   }
 };
 
-function parseVTT(txt) {
-  return txt.split(/\n\n+/).reduce((acc, b) => {
-    const lines = b.trim().split('\n');
-    const i = lines.findIndex(l => l.includes('-->'));
-    if (i < 0) return acc;
-    const toSec = s => {
-      const p = s.trim().replace(',', '.').split(':');
-      return p.length === 3 ? +p[0] * 3600 + +p[1] * 60 + +p[2] : +p[0] * 60 + +p[1];
-    };
-    const [start, end] = lines[i].split('-->').map(toSec);
-    const text = lines.slice(i + 1).join('\n').replace(/<[^>]+>/g, '').trim();
-    if (text) acc.push({ start, end, text });
-    return acc;
-  }, []);
-}
+/* ═══════════════════════════════════════════════════════════
+   Watch-time tracker
+   Fires player:watchtime every 15 s of actual playback
+═══════════════════════════════════════════════════════════ */
+const WatchTime = {
+  _total:0, _seg:0, _last:null, _reported:0,
+  start(){if(this._last!==null)return;this._last=Date.now();},
+  stop(){
+    if(this._last===null)return;
+    this._seg+=Date.now()-this._last;
+    this._last=null;
+    this._flush();
+  },
+  tick(){
+    if(this._last===null)return;
+    const now=Date.now();
+    this._seg+=now-this._last;
+    this._last=now;
+    this._flush();
+  },
+  _flush(){
+    const secs=Math.floor(this._seg/1000);
+    if(secs-this._reported>=15){
+      this._total+=this._seg;this._seg=0;this._reported=0;this._last=this._last===null?null:Date.now();
+      emit('watchtime',{seconds:Math.floor(this._total/1000),token:ED.qualities?.[P.qIdx]?.stream_token});
+    }
+  },
+  total(){return Math.floor(this._total/1000);}
+};
 
-/* ── Player ── */
+/* ═══════════════════════════════════════════════════════════
+   Player
+═══════════════════════════════════════════════════════════ */
 class Player {
-  constructor() {
-    this.V         = $('V');
-    this.W         = $('W');
-    this.qualities = ED.qualities || [];
-    this.qIdx      = 0;
-    this.skipTimes = [];
-    this.autoskip  = true;
-    this.autoplay  = false;
-    this.skipPad   = 2;
-    this.ccOn      = false;
-    this._volPct   = 100;
-    this._seekDrag = false;
+  constructor(){
+    this.V          = $('V');
+    this.W          = $('W');
+    this.qualities  = ED.qualities||[];
+    this.qIdx       = 0;
+    this.skipTimes  = [];
+    this.autoskip   = true;
+    this.autoplay   = false;
+    this.skipPad    = 2;
+    this.ccOn       = false;
+    this._volPct    = 100;
+    this._seekDrag  = false;
     this._wasPaused = false;
-    this._actx = this._gain = this._asrc = null;
+    this._actx=this._gain=this._asrc=null;
     this._skipShown = null;
-    this._autoplayTimer = null;
-    this._started = false;
+    this._apTimer   = null;
+    this._unmuted   = false;
 
     this._buildQ();
     this._bindVideo();
@@ -768,580 +650,664 @@ class Player {
     this._bindTouch();
     this._bindKeys();
     this._bindMessages();
-    this._bindIntro();
+    this._startAutoplay();
 
-    if (MAL_ID) this._fetchSkip();
-    if (ED.thumbnails_url) Thumb.load(ED.thumbnails_url);
-    /* Load poster lazily — does not block video loading at all */
-    if (ED.poster_url) SeekPoster.init(ED.poster_url);
-    emit('ready', {});
+    if(MAL_ID)this._fetchSkip();
+    if(ED.thumbnails_url)Thumb.load(ED.thumbnails_url);
+    if(ED.poster_url)Poster.init(ED.poster_url);
+
+    emit('ready',{episode:ED,qualities:this.qualities});
   }
 
-  /* ── Intro overlay ── */
-  _bindIntro() {
-    const intro = $('intro');
-    const doPlay = () => {
-      if (this._started) return;
-      this._started = true;
-      intro.classList.add('hidden');
-      this._loadSrc(this.qIdx);
-      this.V.play().catch(() => {});
-      emit('firstplay', {});
+  /* ── Auto-start (muted) ── */
+  _startAutoplay(){
+    const V=this.V,bar=$('mute-bar');
+    // Load first quality immediately
+    this._loadSrc(this.qIdx,true);
+
+    const tryPlay=()=>{
+      V.play().then(()=>{
+        bar.classList.add('gone');
+      }).catch(()=>{
+        // Already muted autoplay might still fail on some browsers — show banner
+      });
     };
-    intro.addEventListener('click', doPlay);
-    /* Also allow space/enter to start from intro state */
-    document.addEventListener('keydown', e => {
-      if (this._started) return;
-      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); doPlay(); }
-    }, { once: false });
+
+    V.addEventListener('loadedmetadata',tryPlay,{once:true});
+    V.addEventListener('canplay',tryPlay,{once:true});
+    setTimeout(tryPlay,300);
+
+    // Banner click → unmute
+    bar.addEventListener('click',()=>this._unmute());
+    // Any click on player → unmute
+    this.W.addEventListener('click',()=>this._unmute(),{once:true});
+    this.W.addEventListener('touchend',()=>this._unmute(),{once:true});
   }
 
-  /* ── Audio boost ── */
-  _ensureAudio() {
-    if (this._actx) return;
-    this._actx = new (window.AudioContext || window.webkitAudioContext)();
-    this._gain = this._actx.createGain();
-    this._asrc = this._actx.createMediaElementSource(this.V);
-    this._asrc.connect(this._gain);
-    this._gain.connect(this._actx.destination);
+  _unmute(){
+    if(this._unmuted)return;
+    this._unmuted=true;
+    this.V.muted=false;
+    this.setVol(100);
+    $('mute-bar').classList.add('gone');
+    emit('unmuted',{});
   }
 
   /* ── Quality ── */
-  _buildQ() {
-    const dd = $('q-dd');
-    dd.innerHTML = '';
-    this.qualities.forEach((q, i) => {
-      const el = document.createElement('div');
-      el.className = 'qi' + (i === this.qIdx ? ' cur' : '');
-      el.innerHTML =
-        `<span>${q.quality.toUpperCase()}</span>` +
-        `<span class="qb">${q.audio_type}</span>` +
-        `<svg class="qi-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`;
-      el.addEventListener('click', e => {
+  _buildQ(){
+    const dd=$('q-dd');
+    dd.innerHTML='';
+    this.qualities.forEach((q,i)=>{
+      const el=document.createElement('div');
+      el.className='qi'+(i===this.qIdx?' cur':'');
+      el.innerHTML=
+        `<span>${q.quality.toUpperCase()}</span>`+
+        `<span class="qb">${q.audio_type}</span>`+
+        `<svg class="qi-chk" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`;
+      el.addEventListener('click',e=>{
         e.stopPropagation();
         this.setQuality(i);
         dd.classList.remove('open');
       });
       dd.appendChild(el);
     });
-    const q = this.qualities[this.qIdx];
-    $('q-lbl').textContent = q ? q.quality.toUpperCase() : '—';
+    const q=this.qualities[this.qIdx];
+    $('q-lbl').textContent=q?q.quality.toUpperCase():'—';
   }
 
-  _loadSrc(idx) {
-    const q = this.qualities[idx];
-    if (!q) return;
-    const t = this.V.currentTime, wasPaused = this.V.paused;
-    this.V.src = BASE + '/stream/' + q.stream_token;
+  _loadSrc(idx,initial=false){
+    const q=this.qualities[idx];
+    if(!q)return;
+    const t=this.V.currentTime,wasPaused=this.V.paused;
+    this.V.src=BASE+'/stream/'+q.stream_token;
     this.V.load();
-    this.V.addEventListener('loadedmetadata', () => {
-      if (t > 0.5) this.V.currentTime = t;
-      if (!wasPaused) this.V.play().catch(() => {});
-    }, { once: true });
+    if(!initial){
+      this.V.addEventListener('loadedmetadata',()=>{
+        if(t>0.5)this.V.currentTime=t;
+        if(!wasPaused)this.V.play().catch(()=>{});
+      },{once:true});
+    }
     this._buildQ();
-    emit('qualitychange', { index: idx, quality: q.quality, audioType: q.audio_type });
+    emit('qualitychange',{index:idx,quality:q.quality,audioType:q.audio_type,token:q.stream_token});
   }
 
   /* ── AniSkip ── */
-  async _fetchSkip() {
-    try {
-      const r = await fetch(`/api/aniskip?mal_id=${MAL_ID}&episode=${ED.episode}&episode_length=0`);
-      if (!r.ok) return;
-      const d = await r.json();
-      this.skipTimes = d.results || [];
-      emit('skipTimesLoaded', { skipTimes: this.skipTimes });
-    } catch (_) {}
+  async _fetchSkip(){
+    try{
+      const r=await fetch(`/api/aniskip?mal_id=${MAL_ID}&episode=${ED.episode}&episode_length=0`);
+      if(!r.ok)return;
+      const d=await r.json();
+      this.skipTimes=d.results||[];
+      emit('skiptimes',{skipTimes:this.skipTimes});
+    }catch(_){}
   }
 
-  _checkSkip(t) {
-    const seg = this.skipTimes.find(s => t >= s.startTime && t < s.endTime - this.skipPad);
-    const btn = $('skip-btn');
-    if (seg) {
-      if (this._skipShown !== seg.type) {
-        this._skipShown = seg.type;
-        $('skip-lbl').textContent = seg.type === 'op' ? 'Skip Intro' : 'Skip Outro';
-        btn.style.display = 'flex';
-        if (this.autoskip) this._doSkip(seg);
+  _checkSkip(t){
+    const seg=this.skipTimes.find(s=>t>=s.startTime&&t<s.endTime-this.skipPad);
+    const btn=$('skip');
+    if(seg){
+      if(this._skipShown!==seg.type){
+        this._skipShown=seg.type;
+        $('skip-lbl').textContent=seg.type==='op'?'Skip Intro':'Skip Outro';
+        btn.style.display='flex';
+        if(this.autoskip)this._doSkip(seg);
       }
-    } else {
-      this._skipShown = null;
-      btn.style.display = 'none';
+    }else{
+      this._skipShown=null;
+      btn.style.display='none';
     }
   }
 
-  _doSkip(seg) {
-    this.V.currentTime = seg.endTime;
-    toast((seg.type === 'op' ? 'Intro' : 'Outro') + ' skipped');
-    emit('skipused', { type: seg.type });
+  _doSkip(seg){
+    this.V.currentTime=seg.endTime;
+    toast((seg.type==='op'?'Intro':'Outro')+' skipped');
+    emit('skipused',{type:seg.type,endTime:seg.endTime});
   }
 
   /* ── Video events ── */
-  _bindVideo() {
-    const V = this.V;
-    V.addEventListener('timeupdate', () => {
-      const t = V.currentTime, d = V.duration || 0;
-      $('tc').textContent = fmt(t);
-      const p = d ? t / d * 100 : 0;
-      $('seek-fill').style.width = p + '%';
-      $('seek-thumb').style.left = p + '%';
+  _bindVideo(){
+    const V=this.V;
+    let lastEmitTime=-1;
+
+    V.addEventListener('timeupdate',()=>{
+      const t=V.currentTime,d=V.duration||0;
+      $('tc').textContent=fmt(t);
+      const p=d?t/d*100:0;
+      $('seek-fill').style.width=p+'%';
+      $('seek-thumb').style.left=p+'%';
       this._checkSkip(t);
       CCM.render(t);
-      emit('timeupdate', { currentTime: t, duration: d });
+      WatchTime.tick();
+      // Emit timeupdate to parent every second
+      if(Math.floor(t)!==lastEmitTime){
+        lastEmitTime=Math.floor(t);
+        emit('timeupdate',{currentTime:t,duration:d,percent:p});
+        this._postUp({type:'timeupdate',currentTime:t,duration:d,percent:p});
+      }
     });
-    V.addEventListener('progress', () => {
-      if (!V.buffered.length || !V.duration) return;
-      $('seek-buf').style.width = (V.buffered.end(V.buffered.length - 1) / V.duration * 100) + '%';
+
+    V.addEventListener('progress',()=>{
+      if(!V.buffered.length||!V.duration)return;
+      $('seek-buf').style.width=(V.buffered.end(V.buffered.length-1)/V.duration*100)+'%';
     });
-    V.addEventListener('durationchange', () => { $('td').textContent = fmt(V.duration); });
-    V.addEventListener('waiting',  () => { if (this._started) $('spinner').style.display = 'flex'; });
-    V.addEventListener('canplay',  () => $('spinner').style.display = 'none');
-    V.addEventListener('playing',  () => {
-      $('spinner').style.display = 'none';
+
+    V.addEventListener('durationchange',()=>{$('td').textContent=fmt(V.duration);});
+
+    V.addEventListener('waiting',()=>$('spinner').style.display='flex');
+    V.addEventListener('canplay',()=>$('spinner').style.display='none');
+
+    V.addEventListener('playing',()=>{
+      $('spinner').style.display='none';
       this._syncPlay();
-      emit('play', {});
+      WatchTime.start();
+      emit('play',{currentTime:V.currentTime});
+      this._postUp({type:'play',currentTime:V.currentTime});
     });
-    V.addEventListener('pause',  () => { this._syncPlay(); emit('pause', {}); });
-    V.addEventListener('ended',  () => { this._syncPlay(); this._onEnded(); emit('ended', {}); });
-  }
-
-  _onEnded() {
-    const overlay = $('next-ep-overlay');
-    const nextToken = ED.next_token;
-    if (nextToken) {
-      const info = `${ED.anime_name} · S${String(ED.season).padStart(2,'0')}E${String(ED.episode + 1).padStart(2,'0')}`;
-      $('next-ep-info').textContent = info;
-    } else {
-      $('next-ep-info').textContent = 'No next episode available.';
-    }
-    overlay.classList.add('show');
-    if (this.autoplay && nextToken) {
-      this._startAutoplay(nextToken);
-    } else {
-      emit('requestnext', {});
-    }
-  }
-
-  _startAutoplay(nextToken) {
-    clearTimeout(this._autoplayTimer);
-    const bar = $('autoplay-bar');
-    bar.style.display = 'block';
-    bar.style.transition = 'none';
-    bar.style.transform = 'scaleX(0)';
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        bar.style.transition = 'transform 5s linear';
-        bar.style.transform = 'scaleX(1)';
-      });
+    V.addEventListener('pause',()=>{
+      this._syncPlay();
+      WatchTime.stop();
+      emit('pause',{currentTime:V.currentTime});
+      this._postUp({type:'pause',currentTime:V.currentTime});
     });
-    this._autoplayTimer = setTimeout(() => {
-      bar.style.display = 'none';
-      $('next-ep-overlay').classList.remove('show');
-      window.location.href = BASE + '/player/' + nextToken;
-    }, 5000);
+    V.addEventListener('ended',()=>{
+      this._syncPlay();
+      WatchTime.stop();
+      emit('ended',{watchedSeconds:WatchTime.total()});
+      this._postUp({type:'ended',watchedSeconds:WatchTime.total()});
+      this._onEnded();
+    });
+    V.addEventListener('error',()=>{
+      emit('error',{code:V.error?.code,message:V.error?.message});
+    });
+    V.addEventListener('seeking',()=>{
+      emit('seeking',{currentTime:V.currentTime});
+    });
+    V.addEventListener('seeked',()=>{
+      emit('seeked',{currentTime:V.currentTime});
+    });
   }
 
-  _cancelAutoplay() {
-    clearTimeout(this._autoplayTimer);
-    $('autoplay-bar').style.display = 'none';
+  /* ── postMessage bridge (for iframe embeds) ── */
+  _postUp(data){
+    try{window.parent.postMessage({source:'tsukuyomi-player',...data},'*');}catch(_){}
   }
 
-  _syncPlay() {
-    $('play-ico').setAttribute('d',
-      this.V.paused ? 'M8 5v14l11-7z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+  _onEnded(){
+    const nextToken=ED.next_token;
+    if(nextToken){
+      $('nxt-info').textContent=
+        `${ED.anime_name} · S${String(ED.season).padStart(2,'0')}E${String(ED.episode+1).padStart(2,'0')}`;
+    }else{
+      $('nxt-info').textContent='No next episode.';
+    }
+    $('nxt').classList.add('show');
+    if(this.autoplay&&nextToken){
+      this._startAP(nextToken);
+    }else{
+      emit('requestnext',{hasNext:!!nextToken,nextToken});
+    }
   }
 
-  _syncVol() {
-    const muted = this.V.muted || this._volPct === 0;
-    const d = muted
-      ? 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z'
-      : 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z';
-    $('vol-ico').setAttribute('d', d);
-    $('vol-ind-icon').setAttribute('d', d);
+  _startAP(nextToken){
+    clearTimeout(this._apTimer);
+    const bar=$('ap-bar');
+    bar.style.display='block';bar.style.transition='none';bar.style.transform='scaleX(0)';
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      bar.style.transition='transform 5s linear';bar.style.transform='scaleX(1)';
+    }));
+    this._apTimer=setTimeout(()=>{
+      bar.style.display='none';
+      $('nxt').classList.remove('show');
+      window.location.href=BASE+'/player/'+nextToken;
+    },5000);
+  }
+
+  _cancelAP(){clearTimeout(this._apTimer);$('ap-bar').style.display='none';}
+
+  _syncPlay(){
+    $('play-ico').setAttribute('d',this.V.paused?'M8 5v14l11-7z':'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+  }
+
+  _syncVol(){
+    const muted=this.V.muted||this._volPct===0;
+    const d=muted
+      ?'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z'
+      :'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z';
+    $('vol-ico').setAttribute('d',d);
+    $('vi-ico').setAttribute('d',d);
   }
 
   /* ── Seek bar ── */
-  _bindSeek() {
-    const sb = $('seek-bg'), sw = $('seek');
-    const prev = $('seek-preview'), pimg = $('sp-img'), ptime = $('sp-time');
+  _bindSeek(){
+    const sb=$('seek-bg'),sw=$('seek');
+    const prev=$('sp'),pimg=$('sp-img'),ptim=$('sp-t');
 
-    const pct = clientX => {
-      const r = sb.getBoundingClientRect();
-      return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const pct=clientX=>{
+      const r=sb.getBoundingClientRect();
+      return Math.max(0,Math.min(1,(clientX-r.left)/r.width));
     };
-    const showPrev = (p, clientX) => {
-      const t = p * (this.V.duration || 0);
-      ptime.textContent = fmt(t);
-      Thumb.apply(t, pimg);
-      const r = sb.getBoundingClientRect();
-      const x = Math.max(76, Math.min(r.width - 76, clientX - r.left));
-      prev.style.left = x + 'px';
+    const showPrev=(p,clientX)=>{
+      const t=p*(this.V.duration||0);
+      ptim.textContent=fmt(t);
+      Thumb.apply(t,pimg);
+      const r=sb.getBoundingClientRect();
+      const x=Math.max(76,Math.min(r.width-76,clientX-r.left));
+      prev.style.left=x+'px';
       prev.classList.add('show');
     };
-    const hidePrev = () => prev.classList.remove('show');
+    const hidePrev=()=>prev.classList.remove('show');
 
-    sw.addEventListener('mousemove', e => { if (!this._seekDrag) showPrev(pct(e.clientX), e.clientX); });
-    sw.addEventListener('mouseleave', () => { if (!this._seekDrag) hidePrev(); });
-    sw.addEventListener('mousedown', e => {
+    sw.addEventListener('mousemove',e=>{if(!this._seekDrag)showPrev(pct(e.clientX),e.clientX);});
+    sw.addEventListener('mouseleave',()=>{if(!this._seekDrag)hidePrev();});
+    sw.addEventListener('mousedown',e=>{
       e.preventDefault();
-      this._seekDrag = true; this._wasPaused = this.V.paused;
-      this.V.pause(); sw.classList.add('active');
-      this.V.currentTime = pct(e.clientX) * (this.V.duration || 0);
-      showPrev(pct(e.clientX), e.clientX);
+      this._seekDrag=true;this._wasPaused=this.V.paused;
+      this.V.pause();sw.classList.add('active');
+      this.V.currentTime=pct(e.clientX)*(this.V.duration||0);
+      showPrev(pct(e.clientX),e.clientX);
     });
-    window.addEventListener('mousemove', e => {
-      if (!this._seekDrag) return;
-      this.V.currentTime = pct(e.clientX) * (this.V.duration || 0);
-      showPrev(pct(e.clientX), e.clientX);
+    window.addEventListener('mousemove',e=>{
+      if(!this._seekDrag)return;
+      this.V.currentTime=pct(e.clientX)*(this.V.duration||0);
+      showPrev(pct(e.clientX),e.clientX);
     });
-    window.addEventListener('mouseup', () => {
-      if (!this._seekDrag) return;
-      this._seekDrag = false; sw.classList.remove('active'); hidePrev();
-      if (!this._wasPaused) this.V.play().catch(() => {});
+    window.addEventListener('mouseup',()=>{
+      if(!this._seekDrag)return;
+      this._seekDrag=false;sw.classList.remove('active');hidePrev();
+      if(!this._wasPaused)this.V.play().catch(()=>{});
     });
-
-    sw.addEventListener('touchstart', e => {
+    sw.addEventListener('touchstart',e=>{
       e.stopPropagation();
-      this._seekDrag = true; this._wasPaused = this.V.paused;
-      this.V.pause(); sw.classList.add('active');
-      const t = e.touches[0];
-      this.V.currentTime = pct(t.clientX) * (this.V.duration || 0);
-      showPrev(pct(t.clientX), t.clientX);
-    }, { passive: true });
-    window.addEventListener('touchmove', e => {
-      if (!this._seekDrag) return;
-      const t = e.touches[0];
-      this.V.currentTime = pct(t.clientX) * (this.V.duration || 0);
-      showPrev(pct(t.clientX), t.clientX);
-    }, { passive: true });
-    window.addEventListener('touchend', () => {
-      if (!this._seekDrag) return;
-      this._seekDrag = false; sw.classList.remove('active'); hidePrev();
-      if (!this._wasPaused) this.V.play().catch(() => {});
+      this._seekDrag=true;this._wasPaused=this.V.paused;
+      this.V.pause();sw.classList.add('active');
+      const t=e.touches[0];
+      this.V.currentTime=pct(t.clientX)*(this.V.duration||0);
+      showPrev(pct(t.clientX),t.clientX);
+    },{passive:true});
+    window.addEventListener('touchmove',e=>{
+      if(!this._seekDrag)return;
+      const t=e.touches[0];
+      this.V.currentTime=pct(t.clientX)*(this.V.duration||0);
+      showPrev(pct(t.clientX),t.clientX);
+    },{passive:true});
+    window.addEventListener('touchend',()=>{
+      if(!this._seekDrag)return;
+      this._seekDrag=false;sw.classList.remove('active');hidePrev();
+      if(!this._wasPaused)this.V.play().catch(()=>{});
     });
   }
 
   /* ── Controls ── */
-  _bindControls() {
-    const W = this.W, V = this.V;
-
-    let hideTimer;
-    const showCtrl = () => {
-      W.classList.add('show-ui');
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => { if (!V.paused) W.classList.remove('show-ui'); }, 3000);
+  _bindControls(){
+    const W=this.W,V=this.V;
+    let hideT;
+    const showUI=()=>{
+      W.classList.add('ui');
+      clearTimeout(hideT);
+      hideT=setTimeout(()=>{if(!V.paused)W.classList.remove('ui');},3000);
     };
-    W.addEventListener('mousemove', showCtrl);
+    W.addEventListener('mousemove',showUI);
 
-    W.addEventListener('click', e => {
-      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay,#intro')) return;
-      this._closePanels(null);
+    W.addEventListener('click',e=>{
+      if(e.target.closest('#ctrl,#skip,.panel,#q-dd,#nxt,#mute-bar'))return;
+      this._closePanels();
       this._togglePlay();
-      const f = $('flash'), p = $('flash-path');
-      p.setAttribute('d', V.paused ? 'M8 5v14l11-7z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
-      f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+      const f=$('flash'),p=$('flash-p');
+      p.setAttribute('d',V.paused?'M8 5v14l11-7z':'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+      f.classList.remove('go');void f.offsetWidth;f.classList.add('go');
     });
 
-    W.addEventListener('dblclick', e => {
-      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay,#intro')) return;
+    W.addEventListener('dblclick',e=>{
+      if(e.target.closest('#ctrl,#skip,.panel,#q-dd,#nxt,#mute-bar'))return;
       this._toggleFS();
     });
 
-    $('btn-play').onclick = () => {
-      if (!this._started) { $('intro').click(); return; }
-      this._togglePlay();
-    };
-    $('btn-m10').onclick  = () => this.seek(V.currentTime - 10);
-    $('btn-p10').onclick  = () => this.seek(V.currentTime + 10);
-    $('btn-mute').onclick = () => { V.muted = !V.muted; this._syncVol(); };
-
-    const vs = $('vol-sl');
-    vs.addEventListener('input', () => this.setVol(+vs.value));
-
-    $('skip-btn').onclick = e => {
-      e.stopPropagation();
-      const s = this.skipTimes.find(x => V.currentTime >= x.startTime && V.currentTime < x.endTime);
-      if (s) this._doSkip(s);
+    $('btn-play').onclick=()=>this._togglePlay();
+    $('btn-m10').onclick=()=>this.seek(V.currentTime-10);
+    $('btn-p10').onclick=()=>this.seek(V.currentTime+10);
+    $('btn-mute').onclick=()=>{
+      if(!this._unmuted){this._unmute();return;}
+      V.muted=!V.muted;this._syncVol();
     };
 
-    const ql = $('q-lbl'), qd = $('q-dd');
-    ql.addEventListener('click', e => {
+    const vs=$('vol-sl');
+    vs.addEventListener('input',()=>this.setVol(+vs.value));
+
+    $('skip').onclick=e=>{
       e.stopPropagation();
-      const wasOpen = qd.classList.contains('open');
-      this._closePanels(null);
-      if (!wasOpen) qd.classList.add('open');
+      const s=this.skipTimes.find(x=>V.currentTime>=x.startTime&&V.currentTime<x.endTime);
+      if(s)this._doSkip(s);
+    };
+
+    const ql=$('q-lbl'),qd=$('q-dd');
+    ql.addEventListener('click',e=>{
+      e.stopPropagation();
+      const was=qd.classList.contains('open');
+      this._closePanels();
+      if(!was)qd.classList.add('open');
     });
-    qd.addEventListener('click', e => e.stopPropagation());
+    qd.addEventListener('click',e=>e.stopPropagation());
 
-    $('btn-cc').onclick = e => {
+    $('btn-cc').onclick=e=>{
       e.stopPropagation();
-      this.ccOn = !this.ccOn;
-      $('btn-cc').classList.toggle('on', this.ccOn);
-      if (!this.ccOn) $('sub-text').textContent = '';
-      emit('ccvisibility', { visible: this.ccOn });
+      this.ccOn=!this.ccOn;
+      $('btn-cc').classList.toggle('on',this.ccOn);
+      if(!this.ccOn)$('sub-txt').textContent='';
+      emit('ccvisibility',{visible:this.ccOn});
     };
 
-    $('btn-pip').onclick = async e => {
+    $('btn-pip').onclick=async e=>{
       e.stopPropagation();
-      if (!document.pictureInPictureEnabled) { toast('PiP not supported'); return; }
+      if(!document.pictureInPictureEnabled){toast('PiP not supported');return;}
       document.pictureInPictureElement
-        ? await document.exitPictureInPicture()
-        : await V.requestPictureInPicture().catch(() => toast('PiP failed'));
+        ?await document.exitPictureInPicture()
+        :await V.requestPictureInPicture().catch(()=>toast('PiP failed'));
     };
 
-    $('btn-set').addEventListener('click', e => {
+    $('btn-set').addEventListener('click',e=>{
       e.stopPropagation();
-      const wasOpen = $('settings-panel').classList.contains('open');
-      this._closePanels(null);
-      if (!wasOpen) $('settings-panel').classList.add('open');
+      const was=$('pnl-set').classList.contains('open');
+      this._closePanels();
+      if(!was)$('pnl-set').classList.add('open');
     });
-    $('settings-panel').addEventListener('click', e => e.stopPropagation());
+    $('pnl-set').addEventListener('click',e=>e.stopPropagation());
 
-    $('open-cc').addEventListener('click', e => {
+    $('open-cc').addEventListener('click',e=>{
       e.stopPropagation();
-      $('settings-panel').classList.remove('open');
-      $('cc-panel').classList.add('open');
+      $('pnl-set').classList.remove('open');
+      $('pnl-cc').classList.add('open');
     });
-    $('cc-back').addEventListener('click', e => {
+    $('cc-back').addEventListener('click',e=>{
       e.stopPropagation();
-      $('cc-panel').classList.remove('open');
-      $('settings-panel').classList.add('open');
+      $('pnl-cc').classList.remove('open');
+      $('pnl-set').classList.add('open');
     });
-    $('cc-panel').addEventListener('click', e => e.stopPropagation());
+    $('pnl-cc').addEventListener('click',e=>e.stopPropagation());
 
-    ['cc-size','cc-color','cc-bgop','cc-font','cc-pos'].forEach(id =>
-      $(id).addEventListener('input', () => CCM.sync()));
-    $('cc-track').onchange = e => CCM.setActive(+e.target.value);
+    ['cc-sz','cc-col','cc-bgop','cc-font','cc-pos'].forEach(id=>
+      $(id).addEventListener('input',()=>CCM.sync()));
+    $('cc-track').onchange=e=>CCM.setActive(+e.target.value);
 
-    $('tog-autoskip').onclick = e => { e.stopPropagation(); this.setAutoskip(!this.autoskip); };
-    $('tog-autoplay').onclick = e => { e.stopPropagation(); this.setAutoplay(!this.autoplay); };
-    $('inp-pad').onchange = e => { this.skipPad = parseFloat(e.target.value) || 0; };
-    $('sel-speed').onchange = e => { V.playbackRate = +e.target.value; emit('speedchange', { speed: V.playbackRate }); };
+    $('tog-skip').onclick=e=>{e.stopPropagation();this.setAutoskip(!this.autoskip);};
+    $('tog-ap').onclick=e=>{e.stopPropagation();this.setAutoplay(!this.autoplay);};
+    $('inp-pad').onchange=e=>{this.skipPad=parseFloat(e.target.value)||0;};
+    $('sel-spd').onchange=e=>{V.playbackRate=+e.target.value;emit('speedchange',{speed:V.playbackRate});};
 
-    $('btn-fs').onclick = e => { e.stopPropagation(); this._toggleFS(); };
-    document.addEventListener('fullscreenchange', () => {
-      $('fs-ico').setAttribute('d', document.fullscreenElement
-        ? 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z'
-        : 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z');
+    $('btn-fs').onclick=e=>{e.stopPropagation();this._toggleFS();};
+    document.addEventListener('fullscreenchange',()=>{
+      $('fs-ico').setAttribute('d',document.fullscreenElement
+        ?'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z'
+        :'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z');
     });
 
-    $('btn-next-ep').onclick = e => {
+    $('btn-nxt').onclick=e=>{
       e.stopPropagation();
-      this._cancelAutoplay();
-      $('next-ep-overlay').classList.remove('show');
-      if (ED.next_token) window.location.href = BASE + '/player/' + ED.next_token;
-      else emit('requestnext', {});
+      this._cancelAP();
+      $('nxt').classList.remove('show');
+      if(ED.next_token)window.location.href=BASE+'/player/'+ED.next_token;
+      else emit('requestnext',{hasNext:false});
     };
-    $('btn-replay').onclick = e => {
+    $('btn-rpl').onclick=e=>{
       e.stopPropagation();
-      this._cancelAutoplay();
-      $('next-ep-overlay').classList.remove('show');
-      V.currentTime = 0; V.play().catch(() => {});
+      this._cancelAP();
+      $('nxt').classList.remove('show');
+      V.currentTime=0;V.play().catch(()=>{});
     };
 
-    document.addEventListener('click', e => {
-      if (!e.target.closest('#q-wrap')) $('q-dd').classList.remove('open');
-      if (!e.target.closest('#settings-panel') && !e.target.closest('#btn-set') &&
-          !e.target.closest('#cc-panel') && !e.target.closest('#open-cc')) {
-        $('settings-panel').classList.remove('open');
-        $('cc-panel').classList.remove('open');
+    document.addEventListener('click',e=>{
+      if(!e.target.closest('#q-wrap'))$('q-dd').classList.remove('open');
+      if(!e.target.closest('#pnl-set,#btn-set,#pnl-cc,#open-cc')){
+        $('pnl-set').classList.remove('open');
+        $('pnl-cc').classList.remove('open');
       }
     });
   }
 
   /* ── Touch gestures ── */
-  _bindTouch() {
-    const W = this.W, V = this.V;
-    let showTimer;
+  _bindTouch(){
+    const W=this.W,V=this.V;
+    let showT;
+    W.addEventListener('touchstart',e=>{
+      if(e.target.closest('.panel,#q-dd,#q-wrap,#btn-set,#skip,#nxt,#ctrl,#mute-bar'))return;
+      W.classList.add('ui');
+      clearTimeout(showT);
+      showT=setTimeout(()=>{if(!V.paused)W.classList.remove('ui');},3500);
+    },{passive:true});
 
-    W.addEventListener('touchstart', e => {
-      if (e.target.closest('.panel,#q-dd,#q-wrap,#btn-set,#skip-btn,#next-ep-overlay,#ctrl,#intro')) return;
-      W.classList.add('show-ui');
-      clearTimeout(showTimer);
-      showTimer = setTimeout(() => { if (!V.paused) W.classList.remove('show-ui'); }, 3500);
-    }, { passive: true });
-
-    W.addEventListener('touchstart', e => {
-      if (!e.target.closest('#q-wrap,#q-dd')) $('q-dd').classList.remove('open');
-      if (!e.target.closest('#settings-panel,#btn-set,#cc-panel,#open-cc,#cc-back')) {
-        $('settings-panel').classList.remove('open');
-        $('cc-panel').classList.remove('open');
+    W.addEventListener('touchstart',e=>{
+      if(!e.target.closest('#q-wrap,#q-dd'))$('q-dd').classList.remove('open');
+      if(!e.target.closest('#pnl-set,#btn-set,#pnl-cc,#open-cc,#cc-back')){
+        $('pnl-set').classList.remove('open');
+        $('pnl-cc').classList.remove('open');
       }
-    }, { passive: true });
+    },{passive:true});
 
-    let lastTap = 0, lastSide = null;
-    W.addEventListener('touchend', e => {
-      if (this._seekDrag) return;
-      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay,#btn-set,#q-wrap,#intro')) return;
-      const touch = e.changedTouches[0];
-      const ww = window.innerWidth;
-      const x = touch.clientX, y = touch.clientY;
-      if (y >= $('ctrl').getBoundingClientRect().top) return;
-      const now = Date.now();
-      const side = x < ww * 0.38 ? 'left' : x > ww * 0.62 ? 'right' : 'center';
-      if ((now - lastTap) < 350 && side === lastSide && side !== 'center') {
-        lastTap = 0; lastSide = null;
-        if (side === 'left')  { this.seek(V.currentTime - 10); this._ripple('dtap-left'); }
-        else                  { this.seek(V.currentTime + 10); this._ripple('dtap-right'); }
-      } else {
-        lastTap = now; lastSide = side;
-        if (side === 'center') {
+    let lastTap=0,lastSide=null;
+    W.addEventListener('touchend',e=>{
+      if(this._seekDrag)return;
+      if(e.target.closest('#ctrl,#skip,.panel,#q-dd,#nxt,#btn-set,#q-wrap,#mute-bar'))return;
+      const touch=e.changedTouches[0];
+      const ww=window.innerWidth,x=touch.clientX,y=touch.clientY;
+      if(y>=$('ctrl').getBoundingClientRect().top)return;
+      const now=Date.now();
+      const side=x<ww*0.38?'left':x>ww*0.62?'right':'center';
+      if((now-lastTap)<350&&side===lastSide&&side!=='center'){
+        lastTap=0;lastSide=null;
+        if(side==='left'){this.seek(V.currentTime-10);this._ripple('dtap-l');}
+        else{this.seek(V.currentTime+10);this._ripple('dtap-r');}
+      }else{
+        lastTap=now;lastSide=side;
+        if(side==='center'){
           this._togglePlay();
-          const f = $('flash'), p = $('flash-path');
-          p.setAttribute('d', V.paused ? 'M8 5v14l11-7z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
-          f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+          const f=$('flash'),p=$('flash-p');
+          p.setAttribute('d',V.paused?'M8 5v14l11-7z':'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+          f.classList.remove('go');void f.offsetWidth;f.classList.add('go');
         }
       }
-    }, { passive: true });
+    },{passive:true});
 
-    let sy = null, sv = null, swiping = false;
-    W.addEventListener('touchstart', e => {
-      if (e.target.closest('#ctrl,.panel,#q-dd,#next-ep-overlay,#intro')) return;
-      const t = e.touches[0];
-      const ww = window.innerWidth;
-      if (t.clientX < ww * 0.38 || t.clientX > ww * 0.62) return;
-      if (t.clientY >= $('ctrl').getBoundingClientRect().top) return;
-      sy = t.clientY; sv = this._volPct; swiping = false;
-    }, { passive: true });
-
-    W.addEventListener('touchmove', e => {
-      if (sy === null) return;
-      const dy = sy - e.touches[0].clientY;
-      if (Math.abs(dy) > 8) swiping = true;
-      if (!swiping) return;
-      const nv = Math.max(0, Math.min(200, Math.round(sv + dy / window.innerHeight * 200)));
+    // Center swipe = volume
+    let sy=null,sv=null,swiping=false;
+    W.addEventListener('touchstart',e=>{
+      if(e.target.closest('#ctrl,.panel,#q-dd,#nxt,#mute-bar'))return;
+      const t=e.touches[0],ww=window.innerWidth;
+      if(t.clientX<ww*0.38||t.clientX>ww*0.62)return;
+      if(t.clientY>=$('ctrl').getBoundingClientRect().top)return;
+      sy=t.clientY;sv=this._volPct;swiping=false;
+    },{passive:true});
+    W.addEventListener('touchmove',e=>{
+      if(sy===null)return;
+      const dy=sy-e.touches[0].clientY;
+      if(Math.abs(dy)>8)swiping=true;
+      if(!swiping)return;
+      const nv=Math.max(0,Math.min(200,Math.round(sv+dy/window.innerHeight*200)));
       this.setVol(nv);
-      $('vol-ind-val').textContent = nv + '%';
-      $('vol-indicator').classList.add('show');
-    }, { passive: true });
-
-    W.addEventListener('touchend', () => {
-      sy = null; swiping = false;
-      setTimeout(() => $('vol-indicator').classList.remove('show'), 700);
-    }, { passive: true });
+      $('vi-val').textContent=nv+'%';
+      $('vi').classList.add('show');
+    },{passive:true});
+    W.addEventListener('touchend',()=>{
+      sy=null;swiping=false;
+      setTimeout(()=>$('vi').classList.remove('show'),700);
+    },{passive:true});
   }
 
-  _ripple(id) {
-    const el = $(id);
-    el.classList.remove('go'); void el.offsetWidth; el.classList.add('go');
+  _ripple(id){
+    const el=$(id);
+    el.classList.remove('go');void el.offsetWidth;el.classList.add('go');
   }
 
   /* ── Keyboard ── */
-  _bindKeys() {
-    const V = this.V;
-    document.addEventListener('keydown', e => {
-      if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
-      switch (e.key) {
-        case ' ': case 'k':
-          e.preventDefault();
-          if (!this._started) { $('intro').click(); return; }
-          this._togglePlay(); break;
-        case 'ArrowRight': e.preventDefault(); this.seek(V.currentTime + (e.shiftKey ? 30 : 10)); break;
-        case 'ArrowLeft':  e.preventDefault(); this.seek(V.currentTime - (e.shiftKey ? 30 : 10)); break;
-        case 'ArrowUp':    e.preventDefault(); this.setVol(Math.min(200, this._volPct + 10)); break;
-        case 'ArrowDown':  e.preventDefault(); this.setVol(Math.max(0, this._volPct - 10)); break;
-        case 'f': this._toggleFS(); break;
-        case 'm': V.muted = !V.muted; this._syncVol(); break;
-        case 'c': $('btn-cc').click(); break;
-        case 'Escape': this._closePanels(null); break;
-        case 'i': case 'o': {
-          const s = this.skipTimes.find(x => V.currentTime >= x.startTime && V.currentTime < x.endTime);
-          if (s) this._doSkip(s); break;
+  _bindKeys(){
+    const V=this.V;
+    document.addEventListener('keydown',e=>{
+      if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;
+      switch(e.key){
+        case ' ':case 'k':e.preventDefault();this._togglePlay();break;
+        case 'ArrowRight':e.preventDefault();this.seek(V.currentTime+(e.shiftKey?30:10));break;
+        case 'ArrowLeft':e.preventDefault();this.seek(V.currentTime-(e.shiftKey?30:10));break;
+        case 'ArrowUp':e.preventDefault();this.setVol(Math.min(200,this._volPct+10));break;
+        case 'ArrowDown':e.preventDefault();this.setVol(Math.max(0,this._volPct-10));break;
+        case 'f':this._toggleFS();break;
+        case 'm':if(this._unmuted){V.muted=!V.muted;this._syncVol();}else this._unmute();break;
+        case 'c':$('btn-cc').click();break;
+        case 'Escape':this._closePanels();break;
+        case 'i':case 'o':{
+          const s=this.skipTimes.find(x=>V.currentTime>=x.startTime&&V.currentTime<x.endTime);
+          if(s)this._doSkip(s);break;
         }
       }
     });
   }
 
-  /* ── postMessage API ── */
-  _bindMessages() {
-    window.addEventListener('message', e => {
-      const d = e.data; if (!d?.type) return;
-      switch (d.type) {
-        case 'play':         this.play(); break;
-        case 'pause':        this.pause(); break;
-        case 'seek':         if (d.time != null) this.seek(d.time); break;
-        case 'setvolume':    if (d.value != null) this.setVol(d.value); break;
-        case 'setautoskip':  this.setAutoskip(!!d.value); break;
-        case 'setautoplay':  this.setAutoplay(!!d.value); break;
-        case 'setquality':   if (d.index != null) this.setQuality(d.index); break;
-        case 'setskiptimes': if (Array.isArray(d.times)) this.skipTimes = d.times; break;
-        case 'addtrack':     if (d.url) CCM.add(d.label || 'Sub', d.lang || 'en', d.url); break;
-        case 'getstate':     e.source?.postMessage({ type: 'state', state: this.getState() }, '*'); break;
+  /* ── postMessage API (inbound) ── */
+  _bindMessages(){
+    window.addEventListener('message',e=>{
+      const d=e.data;if(!d?.type)return;
+      switch(d.type){
+        case 'play':         this.play();break;
+        case 'pause':        this.pause();break;
+        case 'seek':         if(d.time!=null)this.seek(d.time);break;
+        case 'setvolume':    if(d.value!=null)this.setVol(d.value);break;
+        case 'setautoskip':  this.setAutoskip(!!d.value);break;
+        case 'setautoplay':  this.setAutoplay(!!d.value);break;
+        case 'setquality':   if(d.index!=null)this.setQuality(d.index);break;
+        case 'setskiptimes': if(Array.isArray(d.times))this.skipTimes=d.times;break;
+        case 'addtrack':     if(d.url)CCM.add(d.label||'Sub',d.lang||'en',d.url);break;
+        case 'loadthumbs':   if(d.url)Thumb.load(d.url);break;
+        case 'getstate':
+          e.source?.postMessage({source:'tsukuyomi-player',type:'state',state:this.getState()},'*');
+          break;
       }
     });
   }
 
   /* ── Internals ── */
-  _togglePlay() {
-    if (!this._started) return;
-    this.V.paused ? this.V.play().catch(() => {}) : this.V.pause();
+  _togglePlay(){
+    if(this.V.paused)this.V.play().catch(()=>{});
+    else this.V.pause();
   }
-  _toggleFS() {
-    if (!document.fullscreenElement) {
-      this.W.requestFullscreen().catch(() => {});
-      screen.orientation?.lock?.('landscape').catch(() => {});
-    } else {
+  _toggleFS(){
+    if(!document.fullscreenElement){
+      this.W.requestFullscreen().catch(()=>{});
+      screen.orientation?.lock?.('landscape').catch(()=>{});
+    }else{
       document.exitFullscreen();
       screen.orientation?.unlock?.();
     }
   }
-  _closePanels(except) {
-    ['q-dd','settings-panel','cc-panel'].forEach(id => {
-      if (id !== except) $(id).classList.remove('open');
-    });
+  _closePanels(){
+    ['q-dd','pnl-set','pnl-cc'].forEach(id=>$(id).classList.remove('open'));
   }
 
   /* ── Public API ── */
-  play()  { if (!this._started) { $('intro').click(); return Promise.resolve(); } return this.V.play(); }
-  pause() { this.V.pause(); }
+  play(){return this.V.play();}
+  pause(){this.V.pause();}
 
-  seek(t) {
-    if (!this._started) return;
-    this.V.currentTime = Math.max(0, Math.min(t, this.V.duration || 0));
-    emit('seek', { currentTime: this.V.currentTime });
+  seek(t){
+    this.V.currentTime=Math.max(0,Math.min(t,this.V.duration||0));
+    emit('seek',{currentTime:this.V.currentTime});
   }
 
-  setVol(pct) {
-    pct = Math.max(0, Math.min(200, Math.round(pct)));
-    this._volPct = pct;
-    const vs = $('vol-sl');
-    vs.value = pct; vs.style.setProperty('--p', (pct / 2) + '%');
-    if (pct > 100) {
-      this._ensureAudio(); this.V.volume = 1; this._gain.gain.value = pct / 100;
-    } else {
-      if (this._gain) this._gain.gain.value = 1;
-      this.V.volume = pct / 100;
+  setVol(pct){
+    pct=Math.max(0,Math.min(200,Math.round(pct)));
+    this._volPct=pct;
+    const vs=$('vol-sl');
+    vs.value=pct;vs.style.setProperty('--p',(pct/2)+'%');
+    if(pct>100){
+      this._ensureAudio();this.V.volume=1;this._gain.gain.value=pct/100;
+    }else{
+      if(this._gain)this._gain.gain.value=1;
+      this.V.volume=pct/100;
     }
-    this.V.muted = pct === 0;
+    this.V.muted=pct===0;
     this._syncVol();
-    emit('volumechange', { volume: pct });
+    emit('volumechange',{volume:pct});
   }
 
-  setQuality(idx) {
-    if (idx < 0 || idx >= this.qualities.length) return;
-    this.qIdx = idx; this._loadSrc(idx);
-    toast('Quality: ' + this.qualities[idx].quality.toUpperCase());
+  setQuality(idx){
+    if(idx<0||idx>=this.qualities.length)return;
+    this.qIdx=idx;this._loadSrc(idx);
+    toast('Quality: '+this.qualities[idx].quality.toUpperCase());
   }
 
-  setAutoskip(v) { this.autoskip = !!v; $('tog-autoskip').className = 'tog' + (v ? ' on' : ''); }
-  setAutoplay(v) { this.autoplay = !!v; $('tog-autoplay').className = 'tog' + (v ? ' on' : ''); }
+  setAutoskip(v){this.autoskip=!!v;$('tog-skip').className='tog'+(v?' on':'');}
+  setAutoplay(v){this.autoplay=!!v;$('tog-ap').className='tog'+(v?' on':'');}
 
-  addSubtitleTrack(url, lang = 'en', label = 'Subtitle') { return CCM.add(label, lang, url); }
-  loadThumbnails(url) { Thumb.load(url); }
+  addSubtitleTrack(url,lang='en',label='Subtitle'){return CCM.add(label,lang,url);}
+  loadThumbnails(url){Thumb.load(url);}
 
-  getState() {
-    return {
-      currentTime: this.V.currentTime, duration: this.V.duration,
-      paused: this.V.paused, volume: this._volPct,
-      qIndex: this.qIdx, quality: this.qualities[this.qIdx],
-      autoskip: this.autoskip, autoplay: this.autoplay,
-      skipTimes: this.skipTimes, ccOn: this.ccOn
+  _ensureAudio(){
+    if(this._actx)return;
+    this._actx=new(window.AudioContext||window.webkitAudioContext)();
+    this._gain=this._actx.createGain();
+    this._asrc=this._actx.createMediaElementSource(this.V);
+    this._asrc.connect(this._gain);
+    this._gain.connect(this._actx.destination);
+  }
+
+  getState(){
+    return{
+      currentTime:this.V.currentTime,duration:this.V.duration,
+      paused:this.V.paused,volume:this._volPct,muted:this.V.muted,
+      qIndex:this.qIdx,quality:this.qualities[this.qIdx],
+      autoskip:this.autoskip,autoplay:this.autoplay,
+      skipTimes:this.skipTimes,ccOn:this.ccOn,
+      watchedSeconds:WatchTime.total(),
     };
   }
 }
 
-window.P = new Player();
+window.P   = new Player();
 window.CCM = CCM;
 window.Thumb = Thumb;
+
+/* ═══════════════════════════════════════════════════════════
+   Site integration guide (postMessage events)
+
+   OUTBOUND events (listen on your site):
+   ──────────────────────────────────────
+   window.addEventListener('message', e => {
+     if (e.data.source !== 'tsukuyomi-player') return;
+     switch (e.data.type) {
+       case 'ready':       // player loaded, e.data.episode, e.data.qualities
+       case 'play':        // e.data.currentTime
+       case 'pause':       // e.data.currentTime
+       case 'timeupdate':  // e.data.currentTime, duration, percent (every second)
+       case 'ended':       // e.data.watchedSeconds
+       case 'seek':        // e.data.currentTime
+       case 'seeking':     // e.data.currentTime
+       case 'seeked':      // e.data.currentTime
+       case 'qualitychange': // e.data.index, quality, audioType, token
+       case 'watchtime':   // e.data.seconds (every 15s of playback), token
+       case 'skiptimes':   // e.data.skipTimes array from AniSkip
+       case 'skipused':    // e.data.type ('op'/'ed'), endTime
+       case 'unmuted':     // user unmuted
+       case 'error':       // e.data.code, message
+       case 'requestnext': // e.data.hasNext, nextToken
+       case 'state':       // response to getstate message
+     }
+   });
+
+   INBOUND commands (send from your site):
+   ──────────────────────────────────────
+   iframe.contentWindow.postMessage({ type: 'play' }, '*');
+   iframe.contentWindow.postMessage({ type: 'pause' }, '*');
+   iframe.contentWindow.postMessage({ type: 'seek', time: 120 }, '*');
+   iframe.contentWindow.postMessage({ type: 'setvolume', value: 80 }, '*');
+   iframe.contentWindow.postMessage({ type: 'setquality', index: 0 }, '*');
+   iframe.contentWindow.postMessage({ type: 'setautoskip', value: true }, '*');
+   iframe.contentWindow.postMessage({ type: 'setautoplay', value: true }, '*');
+   iframe.contentWindow.postMessage({ type: 'addtrack', url: '...', label: 'English', lang: 'en' }, '*');
+   iframe.contentWindow.postMessage({ type: 'loadthumbs', url: '...' }, '*');
+   iframe.contentWindow.postMessage({ type: 'getstate' }, '*');
+
+   EMBED example:
+   ──────────────
+   <iframe src="https://your-bot.repl.co/player/{token}"
+     allow="autoplay; fullscreen; picture-in-picture"
+     style="border:none;width:100%;aspect-ratio:16/9">
+   </iframe>
+═══════════════════════════════════════════════════════════ */
 </script>
 </body>
 </html>
