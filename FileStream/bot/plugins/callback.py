@@ -11,8 +11,9 @@ from pyrogram.enums.parse_mode import ParseMode
 async def cb_data(bot, update: CallbackQuery):
     usr_cmd = update.data.split("_")
     if usr_cmd[0] == "home":
+        username = bot.me.username if bot.me else "TsukuyomiBot"
         await update.message.edit_text(
-            text=LANG.START_TEXT.format(update.from_user.mention, FileStream.username),
+            text=LANG.START_TEXT.format(update.from_user.mention, username),
             disable_web_page_preview=True,
             reply_markup=BUTTON.START_BUTTONS
         )
@@ -23,8 +24,9 @@ async def cb_data(bot, update: CallbackQuery):
             reply_markup=BUTTON.HELP_BUTTONS
         )
     elif usr_cmd[0] == "about":
+        fname = bot.me.first_name if bot.me else "Tsukuyomi"
         await update.message.edit_text(
-            text=LANG.ABOUT_TEXT.format(FileStream.fname, __version__),
+            text=LANG.ABOUT_TEXT.format(fname, __version__),
             disable_web_page_preview=True,
             reply_markup=BUTTON.ABOUT_BUTTONS
         )

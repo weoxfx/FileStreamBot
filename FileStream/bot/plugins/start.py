@@ -19,16 +19,19 @@ async def start(bot: Client, message: Message):
 
     await bot_db.add_user(user_id)
 
+    me = bot.me
+    username = me.username if me else "TsukuyomiBot"
+
     if getattr(Telegram, "START_PIC", None):
         await message.reply_photo(
             photo=Telegram.START_PIC,
-            caption=LANG.START_TEXT.format(message.from_user.mention, FileStream.username),
+            caption=LANG.START_TEXT.format(message.from_user.mention, username),
             parse_mode=ParseMode.HTML,
             reply_markup=BUTTON.START_BUTTONS
         )
     else:
         await message.reply_text(
-            text=LANG.START_TEXT.format(message.from_user.mention, FileStream.username),
+            text=LANG.START_TEXT.format(message.from_user.mention, username),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
             reply_markup=BUTTON.START_BUTTONS
@@ -37,8 +40,9 @@ async def start(bot: Client, message: Message):
 
 @FileStream.on_message(filters.private & filters.command("about"))
 async def about_handler(bot, message):
+    fname = bot.me.first_name if bot.me else "Tsukuyomi"
     await message.reply_text(
-        text=LANG.ABOUT_TEXT.format(FileStream.fname, __version__),
+        text=LANG.ABOUT_TEXT.format(fname, __version__),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
         reply_markup=BUTTON.ABOUT_BUTTONS
