@@ -348,8 +348,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 <body>
 <div id="W">
 
-  <video id="V" preload="auto" playsinline
-    {% if poster_url %}poster="{{ poster_url }}"{% endif %}></video>
+  <video id="V" preload="metadata" playsinline></video>
 
   <!-- Episode title -->
   <div id="ep-title">{{ anime_name }} · S{{ '%02d'|format(season) }}E{{ '%02d'|format(episode) }} · {{ audio_type|upper }}</div>

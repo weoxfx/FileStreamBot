@@ -187,3 +187,49 @@ async def get_episode_qualities(slug, season, episode):
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+async def delete_episode_by_dump_msg(dump_msg_id: int, dump_channel_id: int) -> bool:
+    """
+    Delete the episode row whose dump message was deleted from Telegram.
+    Also removes the parent anime row if it has no episodes left.
+    Returns True if a row was deleted.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, anime_id FROM episodes WHERE dump_msg_id = ? AND dump_channel_id = ?",
+            (dump_msg_id, dump_channel_id)
+        ) as cur:
+            row = await cur.fetchone()
+
+        if not row:
+            return False
+
+        ep_id, anime_id = row
+        await db.execute("DELETE FROM episodes WHERE id = ?", (ep_id,))
+
+        # Clean up the anime row if it has no more episodes
+        async with db.execute(
+            "SELECT COUNT(*) FROM episodes WHERE anime_id = ?", (anime_id,)
+        ) as cur:
+            count_row = await cur.fetchone()
+        if count_row and count_row[0] == 0:
+            await db.execute("DELETE FROM anime WHERE id = ?", (anime_id,))
+
+        await db.commit()
+        logger.info("Deleted episode for dump_msg_id=%s from channel=%s", dump_msg_id, dump_channel_id)
+        return True
+
+
+async def get_episode_by_dump_msg(dump_msg_id: int, dump_channel_id: int):
+    """Look up an episode by its dump channel message ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT e.*, a.name as anime_name, a.slug as anime_slug
+               FROM episodes e JOIN anime a ON e.anime_id = a.id
+               WHERE e.dump_msg_id = ? AND e.dump_channel_id = ?""",
+            (dump_msg_id, dump_channel_id)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None

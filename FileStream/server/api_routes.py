@@ -54,14 +54,32 @@ def _require_key(fn):
     return wrapper
 
 
+# ── Caches ─────────────────────────────────────────────────────────────────────
+
+# Stream cache: token -> dict with decoded file info, avoids get_messages on every chunk
+_stream_cache = {}      # token -> {file_id, mime, size, name, ep}
+_STREAM_CACHE_TTL = 3600
+
+# Poster cache: token -> (bytes, timestamp)
+_poster_cache = {}      # token -> (bytes, float)
+_POSTER_CACHE_TTL = 86400  # 24 hours
+
+
+def _pick_client():
+    index = min(work_loads, key=work_loads.get)
+    return index, multi_clients[index]
+
+
 # ── Public ─────────────────────────────────────────────────────────────────────
 
 @routes.get("/status", allow_head=True)
 async def status_handler(_):
+    me = FileStream.me
+    username = me.username if me else ""
     return web.json_response({
         "server_status": "running",
         "uptime": utils.get_readable_time(time.time() - StartTime),
-        "telegram_bot": "@" + (FileStream.username or ""),
+        "telegram_bot": "@" + username,
         "connected_bots": len(multi_clients),
         "version": __version__,
     })
@@ -85,8 +103,8 @@ async def player_handler(request: web.Request):
     next_token = None
     try:
         all_eps = await site_db.get_episodes_for_anime(ep["anime_slug"], ep["season"])
-        # Find the next episode number (same audio_type preferred)
         next_ep_num = ep["episode"] + 1
+        # Prefer same audio_type
         next_candidates = [
             e for e in all_eps
             if e["episode"] == next_ep_num and e["audio_type"] == ep["audio_type"]
@@ -99,14 +117,15 @@ async def player_handler(request: web.Request):
         pass
 
     episode_data = {
-        "anime_name":  ep["anime_name"],
-        "slug":        ep["anime_slug"],
-        "season":      ep["season"],
-        "episode":     ep["episode"],
-        "audio_type":  ep["audio_type"],
-        "qualities":   qualities,
-        "next_token":  next_token,
-        "poster_url":  "/poster/" + token,
+        "anime_name":     ep["anime_name"],
+        "slug":           ep["anime_slug"],
+        "season":         ep["season"],
+        "episode":        ep["episode"],
+        "audio_type":     ep["audio_type"],
+        "qualities":      qualities,
+        "next_token":     next_token,
+        "poster_url":     "/poster/" + token,
+        "thumbnails_url": None,
     }
 
     try:
@@ -122,22 +141,37 @@ async def player_handler(request: web.Request):
         audio_type   = ep["audio_type"],
         episode_json = json.dumps(episode_data),
         mal_id       = mal_id_val,
-        poster_url   = "/poster/" + token,
     )
     return web.Response(text=html, content_type="text/html")
 
 
 @routes.get("/poster/{token}", allow_head=True)
 async def poster_handler(request: web.Request):
-    """Serve the video thumbnail/poster image from the Telegram dump message."""
+    """
+    Serve the video thumbnail/poster from the Telegram dump message.
+    Results are cached in memory for 24 hours to avoid repeated Telegram calls.
+    """
     token = request.match_info["token"]
+
+    # Serve from cache if available
+    cached = _poster_cache.get(token)
+    if cached:
+        data_bytes, ts = cached
+        if time.time() - ts < _POSTER_CACHE_TTL:
+            return web.Response(
+                body=data_bytes,
+                content_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=604800"},
+            )
+        else:
+            del _poster_cache[token]
+
     try:
         ep = await site_db.get_episode_by_token(token)
         if not ep or not ep.get("dump_msg_id") or not ep.get("dump_channel_id"):
             raise web.HTTPNotFound()
 
-        index = min(work_loads, key=work_loads.get)
-        client = multi_clients[index]
+        index, client = _pick_client()
 
         msg = await client.get_messages(ep["dump_channel_id"], ep["dump_msg_id"])
         if not msg:
@@ -153,12 +187,27 @@ async def poster_handler(request: web.Request):
 
         # Pick the largest thumbnail
         thumb = max(thumbs, key=lambda t: getattr(t, "width", 0) * getattr(t, "height", 0))
-        data = await client.download_media(thumb.file_id, in_memory=True)
-        if not data:
+        bio = await client.download_media(thumb.file_id, in_memory=True)
+        if not bio:
             raise web.HTTPNotFound()
 
+        # BytesIO -> bytes
+        if hasattr(bio, "getvalue"):
+            data_bytes = bio.getvalue()
+        elif hasattr(bio, "read"):
+            bio.seek(0)
+            data_bytes = bio.read()
+        else:
+            data_bytes = bytes(bio)
+
+        if not data_bytes:
+            raise web.HTTPNotFound()
+
+        # Cache it
+        _poster_cache[token] = (data_bytes, time.time())
+
         return web.Response(
-            body=bytes(data),
+            body=data_bytes,
             content_type="image/jpeg",
             headers={"Cache-Control": "public, max-age=604800"},
         )
@@ -173,8 +222,6 @@ async def poster_handler(request: web.Request):
 async def aniskip_proxy(request: web.Request):
     """
     Proxy to AniSkip API — avoids CORS issues from the browser.
-    Query params: mal_id, episode, episode_length (optional, default 0)
-    Returns: { results: [{type, startTime, endTime}] }
     """
     mal_id    = request.rel_url.query.get("mal_id", "")
     episode   = request.rel_url.query.get("episode", "1")
@@ -194,7 +241,6 @@ async def aniskip_proxy(request: web.Request):
                     return web.json_response({"results": []})
                 data = await r.json()
 
-        # Normalise to [{type, startTime, endTime}]
         results = []
         for item in data.get("results", []):
             skip_type = item.get("skipType") or item.get("type", "")
@@ -216,62 +262,99 @@ async def aniskip_proxy(request: web.Request):
 _class_cache = {}
 
 
+async def _get_stream_info(token: str):
+    """
+    Return cached stream info for a token.
+    Fetches from Telegram only on first call; subsequent calls use the cache.
+    This prevents O(N) get_messages calls for multi-chunk video streaming.
+    """
+    now = time.time()
+    cached = _stream_cache.get(token)
+    if cached and now - cached["ts"] < _STREAM_CACHE_TTL:
+        return cached
+
+    ep = await site_db.get_episode_by_token(token)
+    if not ep:
+        return None
+
+    dump_msg_id     = ep["dump_msg_id"]
+    dump_channel_id = ep["dump_channel_id"]
+    if not dump_msg_id or not dump_channel_id:
+        return None
+
+    index, client = _pick_client()
+
+    msg = await client.get_messages(dump_channel_id, dump_msg_id)
+    if not msg:
+        return None
+
+    media = getattr(msg, "video", None) or getattr(msg, "document", None)
+    if not media:
+        return None
+
+    from pyrogram.file_id import FileId
+    file_id   = FileId.decode(media.file_id)
+    file_size = media.file_size or ep.get("file_size", 0)
+    file_name = "{}-s{:02d}e{:02d}-{}-{}.mp4".format(
+        ep["anime_slug"], ep["season"], ep["episode"],
+        ep["audio_type"], ep["quality"]
+    )
+    mime = getattr(media, "mime_type", None) or "video/mp4"
+
+    setattr(file_id, "file_size",  file_size)
+    setattr(file_id, "mime_type",  mime)
+    setattr(file_id, "file_name",  file_name)
+    setattr(file_id, "unique_id",  getattr(media, "file_unique_id", ""))
+
+    info = {
+        "file_id":   file_id,
+        "file_size": file_size,
+        "file_name": file_name,
+        "mime":      mime,
+        "index":     index,
+        "ep":        ep,
+        "ts":        now,
+    }
+    _stream_cache[token] = info
+    return info
+
+
 @routes.get("/stream/{token}", allow_head=True)
 async def stream_handler(request: web.Request):
     token = request.match_info["token"]
 
-    # Redirect browsers to the player page instead of raw bytes
+    # Redirect browsers opening the URL directly (not video elements)
     accept = request.headers.get("Accept", "")
-    if "text/html" in accept and request.method == "GET":
+    if "text/html" in accept and "video/" not in accept and request.method == "GET":
         raise web.HTTPFound(location=f"/player/{token}")
 
     try:
-        ep = await site_db.get_episode_by_token(token)
-        if not ep:
-            raise web.HTTPNotFound(text="Token not found")
+        info = await _get_stream_info(token)
+        if not info:
+            raise web.HTTPNotFound(text="Token not found or no media")
 
-        dump_msg_id    = ep["dump_msg_id"]
-        dump_channel_id = ep["dump_channel_id"]
-        if not dump_msg_id or not dump_channel_id:
-            raise web.HTTPNotFound(text="Stream source not set")
+        file_id   = info["file_id"]
+        file_size = info["file_size"]
+        file_name = info["file_name"]
+        mime      = info["mime"]
+        index     = info["index"]
 
-        index         = min(work_loads, key=work_loads.get)
         faster_client = multi_clients[index]
 
         if faster_client not in _class_cache:
             _class_cache[faster_client] = utils.ByteStreamer(faster_client)
         tg_connect = _class_cache[faster_client]
 
-        msg = await faster_client.get_messages(dump_channel_id, dump_msg_id)
-        if not msg:
-            raise web.HTTPNotFound(text="Dump message not found")
-
-        media = getattr(msg, "video", None) or getattr(msg, "document", None)
-        if not media:
-            raise web.HTTPNotFound(text="No media in dump message")
-
-        from pyrogram.file_id import FileId
-        file_id = FileId.decode(media.file_id)
-        file_size = media.file_size or ep.get("file_size", 0)
-        file_name = "{}-s{:02d}e{:02d}-{}-{}.mp4".format(
-            ep["anime_slug"], ep["season"], ep["episode"],
-            ep["audio_type"], ep["quality"]
-        )
-        setattr(file_id, "file_size",  file_size)
-        setattr(file_id, "mime_type",  getattr(media, "mime_type", "video/mp4"))
-        setattr(file_id, "file_name",  file_name)
-        setattr(file_id, "unique_id",  getattr(media, "file_unique_id", ""))
-
         rng = request.headers.get("Range", "")
         if rng:
             parts = rng.replace("bytes=", "").split("-")
             from_bytes  = int(parts[0])
-            until_bytes = int(parts[1]) if parts[1] else file_size - 1
+            until_bytes = int(parts[1]) if len(parts) > 1 and parts[1] else file_size - 1
         else:
             from_bytes  = request.http_range.start or 0
             until_bytes = (request.http_range.stop or file_size) - 1
 
-        if until_bytes > file_size or from_bytes < 0 or until_bytes < from_bytes:
+        if until_bytes >= file_size or from_bytes < 0 or until_bytes < from_bytes:
             return web.Response(
                 status=416, body="416: Range not satisfiable",
                 headers={"Content-Range": "bytes */{}".format(file_size)},
@@ -289,7 +372,6 @@ async def stream_handler(request: web.Request):
             file_id, index, offset,
             first_part_cut, last_part_cut, part_count, chunk_size
         )
-        mime = getattr(media, "mime_type", None) or "video/mp4"
 
         return web.Response(
             status=206 if rng else 200,
@@ -314,12 +396,11 @@ async def stream_handler(request: web.Request):
 
 @routes.get("/dl/{token}", allow_head=True)
 async def download_handler(request: web.Request):
-    """Same as /stream but attachment disposition."""
+    """Same as /stream but forces attachment download."""
     token = request.match_info["token"]
     ep    = await site_db.get_episode_by_token(token)
     if not ep:
         raise web.HTTPNotFound(text="Token not found")
-    # Re-use stream_handler with the same token but different path
     new_req = request.clone(
         rel_url=request.rel_url.with_path("/stream/" + token)
     )
