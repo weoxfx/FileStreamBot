@@ -1,46 +1,60 @@
 """
-REST API routes for the website.
-All endpoints require the X-API-Key header matching SITE_API_KEY.
+REST API + player routes.
 
-GET  /api/anime                    — list all anime
-GET  /api/anime/{slug}             — anime detail + season list
-GET  /api/episodes/{slug}          — all episodes (optional ?season=N&episode=N)
-GET  /api/qualities/{slug}/{s}/{e} — all quality options for one episode
-GET  /stream/{token}               — stream the actual video (proxies Telegram)
-GET  /status                       — server health (no auth needed)
+Public (no auth):
+  GET /status
+  GET /stream/{token}
+  GET /dl/{token}
+  GET /player/{token}?mal_id=XXX
+  GET /api/aniskip?mal_id=X&episode=Y&episode_length=0
+
+API-key protected (X-API-Key header):
+  GET /api/anime
+  GET /api/anime/{slug}
+  GET /api/episodes/{slug}[?season=N[&episode=N]]
+  GET /api/qualities/{slug}/{season}/{episode}
 """
 import time
 import math
+import json
 import logging
-import mimetypes
 import traceback
 
+import aiohttp
 from aiohttp import web
 from aiohttp.http_exceptions import BadStatusLine
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from FileStream.config import Site, Telegram, Server
 from FileStream.utils import site_db, bot_db
 from FileStream.bot import multi_clients, work_loads, FileStream
 from FileStream import utils, StartTime, __version__
-from FileStream.utils.file_properties import get_file_ids
 
 logger = logging.getLogger(__name__)
-
 routes = web.RouteTableDef()
 
+# Jinja2 env for the player template
+_jinja = Environment(
+    loader=FileSystemLoader("FileStream/template"),
+    autoescape=select_autoescape(["html"]),
+)
 
-def _check_api_key(request: web.Request) -> bool:
-    key = request.headers.get("X-API-Key", "")
-    return key == Site.API_KEY
+
+# ── Auth helper ────────────────────────────────────────────────────────────────
+
+def _check_key(request: web.Request) -> bool:
+    return request.headers.get("X-API-Key", "") == Site.API_KEY
 
 
-def _api_key_required(handler):
+def _require_key(fn):
     async def wrapper(request):
-        if not _check_api_key(request):
+        if not _check_key(request):
             return web.json_response({"error": "Unauthorized"}, status=401)
-        return await handler(request)
+        return await fn(request)
     return wrapper
 
+
+# ── Public ─────────────────────────────────────────────────────────────────────
 
 @routes.get("/status", allow_head=True)
 async def status_handler(_):
@@ -53,96 +67,91 @@ async def status_handler(_):
     })
 
 
-@routes.get("/api/anime")
-@_api_key_required
-async def list_anime(request: web.Request):
-    try:
-        anime_list = await site_db.get_anime_list()
-        return web.json_response({"anime": anime_list})
-    except Exception as e:
-        logger.error("list_anime error: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
+@routes.get("/player/{token}", allow_head=True)
+async def player_handler(request: web.Request):
+    """Serve the full-featured Tsukuyomi video player."""
+    token  = request.match_info["token"]
+    mal_id = request.rel_url.query.get("mal_id", "null")
 
+    ep = await site_db.get_episode_by_token(token)
+    if not ep:
+        raise web.HTTPNotFound(text="Stream token not found")
 
-@routes.get("/api/anime/{slug}")
-@_api_key_required
-async def anime_detail(request: web.Request):
-    slug = request.match_info["slug"]
-    try:
-        episodes = await site_db.get_episodes_for_anime(slug)
-        if not episodes:
-            return web.json_response({"error": "Not found"}, status=404)
+    qualities = await site_db.get_episode_qualities(
+        ep["anime_slug"], ep["season"], ep["episode"]
+    )
 
-        seasons = {}
-        for ep in episodes:
-            s = ep["season"]
-            if s not in seasons:
-                seasons[s] = set()
-            seasons[s].add(ep["episode"])
-
-        return web.json_response({
-            "slug": slug,
-            "seasons": {str(s): sorted(eps) for s, eps in seasons.items()},
-        })
-    except Exception as e:
-        logger.error("anime_detail error: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
-
-
-@routes.get("/api/episodes/{slug}")
-@_api_key_required
-async def episodes_handler(request: web.Request):
-    slug = request.match_info["slug"]
-    season_q = request.rel_url.query.get("season")
-    episode_q = request.rel_url.query.get("episode")
+    episode_data = {
+        "anime_name": ep["anime_name"],
+        "slug":       ep["anime_slug"],
+        "season":     ep["season"],
+        "episode":    ep["episode"],
+        "audio_type": ep["audio_type"],
+        "qualities":  qualities,
+    }
 
     try:
-        season = int(season_q) if season_q else None
-    except ValueError:
-        return web.json_response({"error": "season must be an integer"}, status=400)
+        mal_id_val = int(mal_id)
+    except (ValueError, TypeError):
+        mal_id_val = "null"
 
+    tmpl = _jinja.get_template("player.html")
+    html = tmpl.render(
+        anime_name   = ep["anime_name"],
+        season       = ep["season"],
+        episode      = ep["episode"],
+        audio_type   = ep["audio_type"],
+        episode_json = json.dumps(episode_data),
+        mal_id       = mal_id_val,
+    )
+    return web.Response(text=html, content_type="text/html")
+
+
+@routes.get("/api/aniskip", allow_head=True)
+async def aniskip_proxy(request: web.Request):
+    """
+    Proxy to AniSkip API — avoids CORS issues from the browser.
+    Query params: mal_id, episode, episode_length (optional, default 0)
+    Returns: { results: [{type, startTime, endTime}] }
+    """
+    mal_id    = request.rel_url.query.get("mal_id", "")
+    episode   = request.rel_url.query.get("episode", "1")
+    ep_length = request.rel_url.query.get("episode_length", "0")
+
+    if not mal_id:
+        return web.json_response({"results": []})
+
+    url = (
+        f"https://api.aniskip.com/v2/skip-times/{mal_id}/{episode}"
+        f"?types[]=op&types[]=ed&episodeLength={ep_length}"
+    )
     try:
-        if episode_q and season:
-            ep_num = int(episode_q)
-            qualities = await site_db.get_episode_qualities(slug, season, ep_num)
-            return web.json_response({
-                "slug": slug,
-                "season": season,
-                "episode": ep_num,
-                "qualities": qualities,
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as r:
+                if r.status == 404:
+                    return web.json_response({"results": []})
+                data = await r.json()
+
+        # Normalise to [{type, startTime, endTime}]
+        results = []
+        for item in data.get("results", []):
+            skip_type = item.get("skipType") or item.get("type", "")
+            interval  = item.get("interval", {})
+            results.append({
+                "type":      skip_type,
+                "startTime": interval.get("startTime", 0),
+                "endTime":   interval.get("endTime", 0),
             })
-        else:
-            episodes = await site_db.get_episodes_for_anime(slug, season)
-            return web.json_response({"slug": slug, "episodes": episodes})
+
+        return web.json_response({"results": results})
     except Exception as e:
-        logger.error("episodes_handler error: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
+        logger.warning("AniSkip fetch failed: %s", e)
+        return web.json_response({"results": []})
 
 
-@routes.get("/api/qualities/{slug}/{season}/{episode}")
-@_api_key_required
-async def qualities_handler(request: web.Request):
-    slug = request.match_info["slug"]
-    try:
-        season = int(request.match_info["season"])
-        episode = int(request.match_info["episode"])
-    except ValueError:
-        return web.json_response({"error": "season and episode must be integers"}, status=400)
+# ── Stream ─────────────────────────────────────────────────────────────────────
 
-    try:
-        qualities = await site_db.get_episode_qualities(slug, season, episode)
-        if not qualities:
-            return web.json_response({"error": "Not found"}, status=404)
-        return web.json_response({
-            "slug": slug, "season": season, "episode": episode,
-            "qualities": qualities,
-        })
-    except Exception as e:
-        logger.error("qualities_handler error: %s", e)
-        return web.json_response({"error": str(e)}, status=500)
-
-
-class_cache = {}
+_class_cache = {}
 
 
 @routes.get("/stream/{token}", allow_head=True)
@@ -151,81 +160,78 @@ async def stream_handler(request: web.Request):
     try:
         ep = await site_db.get_episode_by_token(token)
         if not ep:
-            raise web.HTTPNotFound(text="Stream token not found")
+            raise web.HTTPNotFound(text="Token not found")
 
-        dump_msg_id = ep["dump_msg_id"]
+        dump_msg_id    = ep["dump_msg_id"]
         dump_channel_id = ep["dump_channel_id"]
-
         if not dump_msg_id or not dump_channel_id:
-            raise web.HTTPNotFound(text="Stream source not available")
+            raise web.HTTPNotFound(text="Stream source not set")
 
-        index = min(work_loads, key=work_loads.get)
+        index         = min(work_loads, key=work_loads.get)
         faster_client = multi_clients[index]
 
-        if faster_client in class_cache:
-            tg_connect = class_cache[faster_client]
-        else:
-            tg_connect = utils.ByteStreamer(faster_client)
-            class_cache[faster_client] = tg_connect
+        if faster_client not in _class_cache:
+            _class_cache[faster_client] = utils.ByteStreamer(faster_client)
+        tg_connect = _class_cache[faster_client]
 
         msg = await faster_client.get_messages(dump_channel_id, dump_msg_id)
-        if not msg or not msg.video:
-            raise web.HTTPNotFound(text="Dump channel message not found or not a video")
+        if not msg:
+            raise web.HTTPNotFound(text="Dump message not found")
 
-        media = msg.video or msg.document
-        file_id_str = media.file_id
-        file_size = media.file_size or ep.get("file_size", 0)
+        media = getattr(msg, "video", None) or getattr(msg, "document", None)
+        if not media:
+            raise web.HTTPNotFound(text="No media in dump message")
 
         from pyrogram.file_id import FileId
-        file_id = FileId.decode(file_id_str)
-        setattr(file_id, "file_size", file_size)
-        setattr(file_id, "mime_type", getattr(media, "mime_type", "video/mp4"))
-        file_name = (
-            f"{ep['anime_slug']}-s{ep['season']:02d}e{ep['episode']:02d}"
-            f"-{ep['audio_type']}-{ep['quality']}.mp4"
+        file_id = FileId.decode(media.file_id)
+        file_size = media.file_size or ep.get("file_size", 0)
+        file_name = "{}-s{:02d}e{:02d}-{}-{}.mp4".format(
+            ep["anime_slug"], ep["season"], ep["episode"],
+            ep["audio_type"], ep["quality"]
         )
-        setattr(file_id, "file_name", file_name)
-        setattr(file_id, "unique_id", getattr(media, "file_unique_id", ""))
+        setattr(file_id, "file_size",  file_size)
+        setattr(file_id, "mime_type",  getattr(media, "mime_type", "video/mp4"))
+        setattr(file_id, "file_name",  file_name)
+        setattr(file_id, "unique_id",  getattr(media, "file_unique_id", ""))
 
-        range_header = request.headers.get("Range", 0)
-        if range_header:
-            from_bytes, until_bytes = range_header.replace("bytes=", "").split("-")
-            from_bytes = int(from_bytes)
-            until_bytes = int(until_bytes) if until_bytes else file_size - 1
+        rng = request.headers.get("Range", "")
+        if rng:
+            parts = rng.replace("bytes=", "").split("-")
+            from_bytes  = int(parts[0])
+            until_bytes = int(parts[1]) if parts[1] else file_size - 1
         else:
-            from_bytes = request.http_range.start or 0
+            from_bytes  = request.http_range.start or 0
             until_bytes = (request.http_range.stop or file_size) - 1
 
-        if (until_bytes > file_size) or (from_bytes < 0) or (until_bytes < from_bytes):
+        if until_bytes > file_size or from_bytes < 0 or until_bytes < from_bytes:
             return web.Response(
-                status=416,
-                body="416: Range not satisfiable",
-                headers={"Content-Range": f"bytes */{file_size}"},
+                status=416, body="416: Range not satisfiable",
+                headers={"Content-Range": "bytes */{}".format(file_size)},
             )
 
-        chunk_size = 1024 * 1024
-        until_bytes = min(until_bytes, file_size - 1)
-        offset = from_bytes - (from_bytes % chunk_size)
+        chunk_size     = 1024 * 1024
+        until_bytes    = min(until_bytes, file_size - 1)
+        offset         = from_bytes - (from_bytes % chunk_size)
         first_part_cut = from_bytes - offset
-        last_part_cut = until_bytes % chunk_size + 1
-        req_length = until_bytes - from_bytes + 1
-        part_count = math.ceil(until_bytes / chunk_size) - math.floor(offset / chunk_size)
+        last_part_cut  = until_bytes % chunk_size + 1
+        req_length     = until_bytes - from_bytes + 1
+        part_count     = math.ceil(until_bytes / chunk_size) - math.floor(offset / chunk_size)
 
         body = tg_connect.yield_file(
-            file_id, index, offset, first_part_cut, last_part_cut, part_count, chunk_size
+            file_id, index, offset,
+            first_part_cut, last_part_cut, part_count, chunk_size
         )
-
-        mime_type = getattr(media, "mime_type", None) or "video/mp4"
+        mime = getattr(media, "mime_type", None) or "video/mp4"
 
         return web.Response(
-            status=206 if range_header else 200,
+            status=206 if rng else 200,
             body=body,
             headers={
-                "Content-Type": mime_type,
-                "Content-Range": f"bytes {from_bytes}-{until_bytes}/{file_size}",
-                "Content-Length": str(req_length),
-                "Content-Disposition": f'inline; filename="{file_name}"',
-                "Accept-Ranges": "bytes",
+                "Content-Type":        mime,
+                "Content-Range":       "bytes {}-{}/{}".format(from_bytes, until_bytes, file_size),
+                "Content-Length":      str(req_length),
+                "Content-Disposition": 'inline; filename="{}"'.format(file_name),
+                "Accept-Ranges":       "bytes",
             },
         )
 
@@ -235,14 +241,99 @@ async def stream_handler(request: web.Request):
         pass
     except Exception as e:
         traceback.print_exc()
-        logger.critical("stream_handler error: %s", e)
         raise web.HTTPInternalServerError(text=str(e))
 
 
 @routes.get("/dl/{token}", allow_head=True)
 async def download_handler(request: web.Request):
-    """Same as /stream but forces Content-Disposition: attachment."""
+    """Same as /stream but attachment disposition."""
     token = request.match_info["token"]
-    request.match_info._route = None
-    request = request.clone(rel_url=request.rel_url.with_path(f"/stream/{token}"))
-    return await stream_handler(request)
+    ep    = await site_db.get_episode_by_token(token)
+    if not ep:
+        raise web.HTTPNotFound(text="Token not found")
+    # Re-use stream_handler with the same token but different path
+    new_req = request.clone(
+        rel_url=request.rel_url.with_path("/stream/" + token)
+    )
+    resp = await stream_handler(new_req)
+    if hasattr(resp, "headers"):
+        file_name = "{}-s{:02d}e{:02d}-{}-{}.mp4".format(
+            ep["anime_slug"], ep["season"], ep["episode"],
+            ep["audio_type"], ep["quality"]
+        )
+        resp.headers["Content-Disposition"] = 'attachment; filename="{}"'.format(file_name)
+    return resp
+
+
+# ── Site API (key-protected) ────────────────────────────────────────────────────
+
+@routes.get("/api/anime")
+@_require_key
+async def list_anime(request: web.Request):
+    try:
+        return web.json_response({"anime": await site_db.get_anime_list()})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+@routes.get("/api/anime/{slug}")
+@_require_key
+async def anime_detail(request: web.Request):
+    slug = request.match_info["slug"]
+    try:
+        eps = await site_db.get_episodes_for_anime(slug)
+        if not eps:
+            return web.json_response({"error": "Not found"}, status=404)
+        seasons = {}
+        for ep in eps:
+            s = ep["season"]
+            seasons.setdefault(s, set()).add(ep["episode"])
+        return web.json_response({
+            "slug": slug,
+            "seasons": {str(s): sorted(v) for s, v in seasons.items()},
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+@routes.get("/api/episodes/{slug}")
+@_require_key
+async def episodes_handler(request: web.Request):
+    slug = request.match_info["slug"]
+    sq   = request.rel_url.query.get("season")
+    eq   = request.rel_url.query.get("episode")
+    try:
+        season = int(sq) if sq else None
+    except ValueError:
+        return web.json_response({"error": "season must be integer"}, status=400)
+    try:
+        if eq and season is not None:
+            qualities = await site_db.get_episode_qualities(slug, season, int(eq))
+            return web.json_response({
+                "slug": slug, "season": season, "episode": int(eq),
+                "qualities": qualities,
+            })
+        eps = await site_db.get_episodes_for_anime(slug, season)
+        return web.json_response({"slug": slug, "episodes": eps})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+@routes.get("/api/qualities/{slug}/{season}/{episode}")
+@_require_key
+async def qualities_handler(request: web.Request):
+    slug = request.match_info["slug"]
+    try:
+        season  = int(request.match_info["season"])
+        episode = int(request.match_info["episode"])
+    except ValueError:
+        return web.json_response({"error": "season/episode must be integers"}, status=400)
+    try:
+        qs = await site_db.get_episode_qualities(slug, season, episode)
+        if not qs:
+            return web.json_response({"error": "Not found"}, status=404)
+        return web.json_response({
+            "slug": slug, "season": season, "episode": episode, "qualities": qs,
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)

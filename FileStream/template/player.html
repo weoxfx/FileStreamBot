@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ anime_name }} — S{{ '%02d'|format(season) }}E{{ '%02d'|format(episode) }} · Tsukuyomi</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --gold:#C9A227;--gold2:#FFD700;--gold3:#8a6e0f;
+  --glass:rgba(8,6,0,.6);--glass2:rgba(12,9,0,.88);
+  --bd:rgba(201,162,39,.2);
+  --dark:#07060d;--r:9px;
+  --ctrl:#ddd;
+}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif;color:#eee}
+
+/* ── Wrapper ── */
+#W{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:#000;cursor:none}
+#W.cursor-visible{cursor:default}
+video{width:100%;height:100%;object-fit:contain;display:block}
+
+/* ── Skip intro ── */
+#skip-btn{
+  position:absolute;bottom:84px;right:20px;
+  display:none;align-items:center;gap:7px;
+  padding:9px 18px;
+  background:var(--glass);border:1.5px solid var(--gold);
+  backdrop-filter:blur(14px);border-radius:7px;
+  color:var(--gold2);font-size:14px;font-weight:600;
+  cursor:pointer;pointer-events:all;z-index:50;user-select:none;
+  transition:background .18s,transform .12s;
+}
+#skip-btn:hover{background:rgba(201,162,39,.18);transform:scale(1.03)}
+#skip-btn svg{width:16px;height:16px;fill:var(--gold2);flex-shrink:0}
+
+/* ── Toast ── */
+#toast{
+  position:absolute;top:12px;right:14px;
+  padding:5px 14px;background:var(--glass);border:1px solid var(--gold);
+  backdrop-filter:blur(12px);border-radius:6px;
+  font-size:12px;color:var(--gold2);pointer-events:none;
+  display:none;z-index:60;
+}
+
+/* ── Ep title ── */
+#ep-info{
+  position:absolute;top:12px;left:14px;
+  font-size:13px;color:rgba(255,255,255,.72);
+  text-shadow:0 1px 4px #000;pointer-events:none;z-index:20;
+  line-height:1.6;
+}
+#ep-info b{color:var(--gold2)}
+
+/* ── Spinner ── */
+#spinner{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);display:none;z-index:25;pointer-events:none;
+}
+#spinner svg{width:46px;height:46px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Center flash ── */
+#flash{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%) scale(0);pointer-events:none;opacity:0;z-index:22;
+}
+#flash svg{width:60px;height:60px;fill:rgba(255,255,255,.8);filter:drop-shadow(0 0 10px var(--gold))}
+@keyframes flashAnim{0%{transform:translate(-50%,-50%) scale(.6);opacity:.95}100%{transform:translate(-50%,-50%) scale(1.5);opacity:0}}
+#flash.go{animation:flashAnim .38s ease-out forwards}
+
+/* ── Controls bar ── */
+#ctrl{
+  position:absolute;bottom:0;left:0;right:0;
+  padding:0 14px 10px;
+  background:linear-gradient(0deg,rgba(0,0,0,.85) 0%,transparent 100%);
+  backdrop-filter:blur(3px);
+  display:flex;flex-direction:column;gap:7px;
+  opacity:0;transition:opacity .22s;pointer-events:none;z-index:30;
+}
+#W.show-ctrl #ctrl,#ctrl.locked{opacity:1;pointer-events:all}
+
+/* Seek row */
+#seek-row{display:flex;align-items:center;gap:8px;width:100%}
+.t{font-size:12px;color:#bbb;white-space:nowrap;min-width:36px;text-align:center}
+
+#seek{
+  flex:1;height:18px;display:flex;align-items:center;
+  cursor:pointer;position:relative;
+}
+#seek-bg{
+  width:100%;height:4px;background:rgba(255,255,255,.15);
+  border-radius:4px;position:relative;
+}
+#seek-buf,#seek-fill{
+  position:absolute;left:0;top:0;height:100%;
+  border-radius:4px;pointer-events:none;
+}
+#seek-buf{background:rgba(201,162,39,.28);width:0}
+#seek-fill{background:var(--gold);width:0}
+#seek-thumb{
+  position:absolute;top:50%;
+  width:12px;height:12px;
+  background:var(--gold2);border-radius:50%;
+  transform:translate(-50%,-50%) scale(0);
+  transition:transform .12s;pointer-events:none;
+  box-shadow:0 0 6px var(--gold);
+}
+#seek:hover #seek-thumb{transform:translate(-50%,-50%) scale(1)}
+
+/* Btn row */
+#btn-row{display:flex;align-items:center;gap:2px;width:100%}
+.cb{
+  background:none;border:none;
+  color:var(--ctrl);cursor:pointer;
+  width:36px;height:36px;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:6px;flex-shrink:0;position:relative;
+  transition:background .15s,color .15s;
+}
+.cb:hover{background:rgba(201,162,39,.14);color:var(--gold2)}
+.cb svg{width:20px;height:20px;fill:currentColor;pointer-events:none}
+.cb.active{color:var(--gold2)}
+.sp{flex:1}
+
+/* Vol */
+#vol-wrap{display:flex;align-items:center;gap:5px;flex-shrink:0}
+#vol-sl{
+  -webkit-appearance:none;width:68px;height:4px;border-radius:4px;
+  background:linear-gradient(to right,var(--gold) var(--p,50%),rgba(255,255,255,.18) var(--p,50%));
+  outline:none;cursor:pointer;
+}
+#vol-sl::-webkit-slider-thumb{
+  -webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+  background:var(--gold2);box-shadow:0 0 4px var(--gold);
+}
+#vol-pct{font-size:11px;color:#aaa;min-width:30px}
+
+/* Quality badge */
+#q-wrap{position:relative;flex-shrink:0}
+#q-lbl{
+  padding:4px 10px;border:1px solid var(--bd);border-radius:5px;
+  background:var(--glass);color:var(--gold2);
+  font-size:12px;font-weight:700;cursor:pointer;
+  user-select:none;white-space:nowrap;
+}
+#q-dd{
+  display:none;position:absolute;bottom:calc(100% + 6px);right:0;
+  background:var(--glass2);border:1px solid var(--bd);
+  backdrop-filter:blur(16px);border-radius:var(--r);
+  min-width:160px;overflow:hidden;z-index:60;
+}
+#q-dd.open{display:block}
+.qi{
+  padding:9px 14px;font-size:13px;cursor:pointer;
+  display:flex;align-items:center;gap:8px;
+  border-bottom:1px solid rgba(201,162,39,.07);
+  transition:background .1s;
+}
+.qi:last-child{border:none}
+.qi:hover{background:rgba(201,162,39,.13)}
+.qi.cur{color:var(--gold2);font-weight:600}
+.qb{font-size:10px;padding:2px 5px;border-radius:3px;background:rgba(201,162,39,.17);color:var(--gold);text-transform:uppercase;letter-spacing:.5px}
+
+/* ── Panels ── */
+.panel{
+  display:none;position:absolute;
+  background:var(--glass2);border:1px solid var(--bd);
+  backdrop-filter:blur(18px);border-radius:var(--r);
+  padding:14px 16px;z-index:60;pointer-events:all;min-width:240px;
+}
+.panel.open{display:block}
+#settings-panel{bottom:72px;right:14px}
+
+.ph{font-size:11px;color:var(--gold);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bd)}
+.sr{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(201,162,39,.06);font-size:13px}
+.sr:last-child{border:none}
+.sl{color:#bbb}
+.tog{width:36px;height:19px;border-radius:10px;background:rgba(255,255,255,.14);position:relative;cursor:pointer;transition:background .2s;flex-shrink:0}
+.tog.on{background:var(--gold3)}
+.tog::after{content:'';position:absolute;top:2.5px;left:2.5px;width:14px;height:14px;border-radius:50%;background:#eee;transition:left .2s}
+.tog.on::after{left:19.5px}
+.snum{background:none;border:1px solid var(--bd);color:var(--gold2);border-radius:4px;width:52px;padding:3px 5px;font-size:12px;text-align:center}
+.ssel{background:rgba(8,6,0,.7);border:1px solid var(--bd);color:var(--gold2);border-radius:4px;padding:3px 5px;font-size:12px;cursor:pointer}
+
+/* CC settings sub-panel */
+#cc-panel{bottom:72px;right:14px;min-width:260px}
+.cc-back{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--gold);font-size:12px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
+.cc-back svg{width:14px;height:14px;fill:var(--gold)}
+
+/* Subtitle renderer */
+#sub-box{
+  position:absolute;bottom:88px;left:50%;transform:translateX(-50%);
+  text-align:center;pointer-events:none;z-index:28;
+  max-width:90%;
+}
+#sub-box span{
+  display:inline-block;
+  font-size:22px;color:#fff;
+  background:rgba(0,0,0,.75);
+  padding:3px 8px;border-radius:4px;
+  line-height:1.5;
+  white-space:pre-wrap;
+}
+
+/* Tooltip */
+.cb::after{
+  content:attr(data-tip);
+  position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.82);color:#eee;font-size:11px;
+  padding:3px 8px;border-radius:4px;white-space:nowrap;pointer-events:none;
+  opacity:0;transition:opacity .15s;
+}
+.cb:hover::after{opacity:1}
+</style>
+</head>
+<body>
+<div id="W">
+
+  <video id="V" preload="auto" playsinline></video>
+
+  <!-- Sub box (custom CC renderer) -->
+  <div id="sub-box"><span id="sub-text"></span></div>
+
+  <!-- Ep info -->
+  <div id="ep-info">
+    <b>{{ anime_name }}</b><br>
+    <span style="font-size:11px;color:#aaa">
+      S{{ '%02d'|format(season) }}E{{ '%02d'|format(episode) }}
+      &nbsp;·&nbsp;<span id="aud-badge">{{ audio_type|upper }}</span>
+    </span>
+  </div>
+
+  <!-- Skip button -->
+  <div id="skip-btn">
+    <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zm8.5-6L23 6v12l-8.5-6z"/></svg>
+    <span id="skip-lbl">Skip Intro</span>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <!-- Spinner -->
+  <div id="spinner">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#C9A227" stroke-width="2.5">
+      <circle cx="12" cy="12" r="10" stroke-opacity=".2"/>
+      <path d="M12 2a10 10 0 0 1 10 10"/>
+    </svg>
+  </div>
+
+  <!-- Flash icon -->
+  <div id="flash"><svg viewBox="0 0 24 24"><path id="flash-path" d="M8 5v14l11-7z"/></svg></div>
+
+  <!-- Settings panel -->
+  <div class="panel" id="settings-panel">
+    <div class="ph">Settings</div>
+    <div class="sr">
+      <span class="sl">Playback speed</span>
+      <select class="ssel" id="sel-speed">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="0.75">0.75×</option>
+        <option value="1" selected>1×</option>
+        <option value="1.25">1.25×</option>
+        <option value="1.5">1.5×</option>
+        <option value="1.75">1.75×</option>
+        <option value="2">2×</option>
+      </select>
+    </div>
+    <div class="sr">
+      <span class="sl">Autoskip intros</span>
+      <div class="tog on" id="tog-autoskip"></div>
+    </div>
+    <div class="sr">
+      <span class="sl">Autoplay next</span>
+      <div class="tog" id="tog-autoplay"></div>
+    </div>
+    <div class="sr">
+      <span class="sl">Skip padding (s)</span>
+      <input class="snum" type="number" id="inp-pad" value="2" min="0" max="10">
+    </div>
+    <div class="sr" style="cursor:pointer" id="open-cc-settings">
+      <span class="sl">Subtitle settings →</span>
+      <svg style="width:14px;height:14px;fill:#aaa" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6-6-6z"/></svg>
+    </div>
+  </div>
+
+  <!-- CC (subtitle settings) sub-panel -->
+  <div class="panel" id="cc-panel">
+    <div class="cc-back" id="back-to-settings">
+      <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+      Back to Settings
+    </div>
+    <div class="ph">Subtitle Settings</div>
+
+    <div class="sr">
+      <span class="sl">Track</span>
+      <select class="ssel" id="cc-track-sel" style="max-width:120px"><option value="-1">Off</option></select>
+    </div>
+    <div class="sr">
+      <span class="sl">Font size</span>
+      <select class="ssel" id="cc-size">
+        <option value="14">Small</option>
+        <option value="18">Normal</option>
+        <option value="22" selected>Medium</option>
+        <option value="28">Large</option>
+        <option value="34">XL</option>
+      </select>
+    </div>
+    <div class="sr">
+      <span class="sl">Text color</span>
+      <input type="color" id="cc-color" value="#ffffff" style="width:36px;height:24px;border:1px solid var(--bd);border-radius:4px;background:none;cursor:pointer">
+    </div>
+    <div class="sr">
+      <span class="sl">Background opacity</span>
+      <input class="snum" type="number" id="cc-bg-op" value="75" min="0" max="100">
+    </div>
+    <div class="sr">
+      <span class="sl">Font family</span>
+      <select class="ssel" id="cc-font">
+        <option value="'Segoe UI',sans-serif">Default</option>
+        <option value="Arial,sans-serif">Arial</option>
+        <option value="Georgia,serif">Georgia</option>
+        <option value="'Courier New',monospace">Monospace</option>
+        <option value="Impact,sans-serif">Impact</option>
+      </select>
+    </div>
+    <div class="sr">
+      <span class="sl">Position</span>
+      <select class="ssel" id="cc-pos">
+        <option value="bottom">Bottom</option>
+        <option value="top">Top</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div id="ctrl">
+
+    <!-- Seek -->
+    <div id="seek-row">
+      <span class="t" id="tc">0:00</span>
+      <div id="seek">
+        <div id="seek-bg">
+          <div id="seek-buf"></div>
+          <div id="seek-fill"></div>
+          <div id="seek-thumb"></div>
+        </div>
+      </div>
+      <span class="t" id="td">0:00</span>
+    </div>
+
+    <!-- Buttons -->
+    <div id="btn-row">
+
+      <!-- Play/Pause -->
+      <button class="cb" id="btn-play" data-tip="Play (Space)">
+        <svg viewBox="0 0 24 24"><path id="play-path" d="M8 5v14l11-7z"/></svg>
+      </button>
+
+      <!-- –10 / +10 -->
+      <button class="cb" id="btn-m10" data-tip="–10s (←)">
+        <svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8zm-1.1 11H10v-3.26L9 13.14v-.85l1.85-.66h.05V16zm2.76-2.28c.14-.18.21-.47.21-.87v-.72c0-.4-.07-.69-.21-.87s-.35-.28-.63-.28-.49.09-.63.28-.21.47-.21.87v.72c0 .4.07.69.21.87.14.18.35.28.63.28s.49-.09.63-.28zM13 11.1c.28-.31.7-.47 1.26-.47s.98.16 1.26.47.43.77.43 1.39v.72c0 .61-.14 1.08-.43 1.39s-.7.47-1.26.47-.98-.16-1.26-.47-.43-.77-.43-1.39v-.72c0-.62.14-1.08.43-1.39z"/></svg>
+      </button>
+      <button class="cb" id="btn-p10" data-tip="+10s (→)">
+        <svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8zm-1.1 11H10v-3.26L9 13.14v-.85l1.85-.66h.05V16zm4.76-4.28c.14-.18.21-.47.21-.87v-.72c0-.4-.07-.69-.21-.87s-.35-.28-.63-.28-.49.09-.63.28-.21.47-.21.87v.72c0 .4.07.69.21.87.14.18.35.28.63.28s.49-.09.63-.28zM15 11.1c.28-.31.7-.47 1.26-.47s.98.16 1.26.47.43.77.43 1.39v.72c0 .61-.14 1.08-.43 1.39s-.7.47-1.26.47-.98-.16-1.26-.47-.43-.77-.43-1.39v-.72c0-.62.14-1.08.43-1.39z"/></svg>
+      </button>
+
+      <!-- Volume -->
+      <div id="vol-wrap">
+        <button class="cb" id="btn-mute" data-tip="Mute (M)">
+          <svg viewBox="0 0 24 24"><path id="vol-path" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        </button>
+        <input type="range" id="vol-sl" min="0" max="200" value="100" style="--p:50%">
+        <span id="vol-pct">100%</span>
+      </div>
+
+      <!-- Timestamp -->
+      <span id="ts-display" style="font-size:12px;color:#999;white-space:nowrap;padding:0 6px;flex-shrink:0">0:00 / 0:00</span>
+
+      <div class="sp"></div>
+
+      <!-- CC toggle -->
+      <button class="cb" id="btn-cc" data-tip="Subtitles (C)">
+        <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-9 9H9.5v-.5h-2v3h2V15H11v1H7V9h4v1H9.5v.5H11v1.5zm7 0h-1.5v-.5h-2v3h2V15H18v1h-4V9h4v1h-1.5v.5H18v1.5z"/></svg>
+      </button>
+
+      <!-- Quality -->
+      <div id="q-wrap">
+        <div id="q-lbl">—</div>
+        <div id="q-dd"></div>
+      </div>
+
+      <!-- PiP -->
+      <button class="cb" id="btn-pip" data-tip="Picture in Picture">
+        <svg viewBox="0 0 24 24"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.99 2 1.99h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16.01H3V4.99h18v14.02z"/></svg>
+      </button>
+
+      <!-- Cast -->
+      <button class="cb" id="btn-cast" data-tip="Cast to TV">
+        <svg viewBox="0 0 24 24"><path d="M1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2C12 14.14 7.03 9 1 9zm20-6H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+      </button>
+
+      <!-- Settings -->
+      <button class="cb" id="btn-settings" data-tip="Settings">
+        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.04-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58a.47.47 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.04.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61l-2.03-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      </button>
+
+      <!-- Fullscreen -->
+      <button class="cb" id="btn-fs" data-tip="Fullscreen (F)">
+        <svg viewBox="0 0 24 24"><path id="fs-path" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+      </button>
+
+    </div><!-- /btn-row -->
+  </div><!-- /ctrl -->
+
+</div><!-- /W -->
+
+<script>
+/* ─── Server-injected data ─── */
+const ED = {{ episode_json }};   // {anime_name, season, episode, audio_type, qualities:[...]}
+const MAL_ID = {{ mal_id }};     // int or null
+
+const BASE = window.location.origin;
+const fmt = s => { if(!isFinite(s)) return '0:00'; s=Math.floor(s); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+const dispatch = (n,d) => window.dispatchEvent(new CustomEvent('player:'+n,{detail:d}));
+const toast = (msg,ms=2200) => {
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.style.display='block';
+  clearTimeout(toast._t); toast._t=setTimeout(()=>el.style.display='none',ms);
+};
+
+/* ─── CC (subtitle) manager ─── */
+const CCM = {
+  tracks: [],          // [{label, lang, url, cues:[{start,end,text}]}]
+  activeIdx: -1,
+  settings: { size:22, color:'#ffffff', bgOp:75, font:"'Segoe UI',sans-serif", pos:'bottom' },
+
+  add(label, lang, url) {
+    const idx = this.tracks.length;
+    this.tracks.push({ label, lang, url, cues:[] });
+    fetch(url).then(r=>r.text()).then(txt=>{ this.tracks[idx].cues = parseVTT(txt); });
+    const sel = document.getElementById('cc-track-sel');
+    const opt = document.createElement('option');
+    opt.value=idx; opt.textContent=label+' ('+lang+')';
+    sel.appendChild(opt);
+    return idx;
+  },
+
+  setActive(idx) {
+    this.activeIdx = parseInt(idx);
+    document.getElementById('cc-track-sel').value = idx;
+    dispatch('ccchange', { index: idx, label: idx>=0 ? this.tracks[idx]?.label : null });
+  },
+
+  render(t) {
+    const box  = document.getElementById('sub-box');
+    const span = document.getElementById('sub-text');
+    if (this.activeIdx < 0 || !P.ccVisible) { span.textContent=''; return; }
+    const trk = this.tracks[this.activeIdx];
+    if (!trk) { span.textContent=''; return; }
+    const cue = trk.cues.find(c => t >= c.start && t <= c.end);
+    span.textContent = cue ? cue.text : '';
+    // Apply settings
+    const s = this.settings;
+    span.style.fontSize    = s.size+'px';
+    span.style.color       = s.color;
+    span.style.fontFamily  = s.font;
+    const bga = Math.round(s.bgOp * 2.55);
+    span.style.background  = `rgba(0,0,0,${(s.bgOp/100).toFixed(2)})`;
+    box.style.bottom       = s.pos==='bottom' ? '88px' : 'auto';
+    box.style.top          = s.pos==='top'    ? '54px' : 'auto';
+  },
+
+  applySettings() {
+    this.settings.size  = parseInt(document.getElementById('cc-size').value);
+    this.settings.color = document.getElementById('cc-color').value;
+    this.settings.bgOp  = parseInt(document.getElementById('cc-bg-op').value);
+    this.settings.font  = document.getElementById('cc-font').value;
+    this.settings.pos   = document.getElementById('cc-pos').value;
+    dispatch('ccsettings', { settings: this.settings });
+  }
+};
+
+function parseVTT(txt) {
+  const cues = [];
+  const blocks = txt.split(/\n\n+/);
+  const ts = str => {
+    const [h,m,s] = str.trim().replace(',','.').split(':');
+    return (parseFloat(h)||0)*3600 + (parseFloat(m)||0)*60 + (parseFloat(s)||0);
+  };
+  blocks.forEach(b => {
+    const lines = b.trim().split('\n');
+    const arrow = lines.findIndex(l=>l.includes('-->'));
+    if (arrow < 0) return;
+    const [st, et] = lines[arrow].split('-->').map(ts);
+    const text = lines.slice(arrow+1).join('\n').trim();
+    if (text) cues.push({ start:st, end:et, text });
+  });
+  return cues;
+}
+
+/* ─── Main Player class ─── */
+class TsukuyomiPlayer {
+  constructor() {
+    this.V         = document.getElementById('V');
+    this.qualities = ED.qualities || [];
+    this.qIdx      = 0;
+    this.skipTimes = [];
+    this.autoskip  = true;
+    this.autoplay  = false;
+    this.skipPad   = 2;
+    this.ccVisible = false;
+    this._skipShown = null;
+    this._volPct    = 100;
+    this._ctx = this._gain = this._src = null;
+    this._drag = false; this._wasPaused = false;
+
+    this._buildQ();
+    this._loadSrc(0);
+    this._bindVideo();
+    this._bindUI();
+    if (MAL_ID) this._fetchSkip();
+    dispatch('ready', {});
+  }
+
+  /* ── Web Audio ── */
+  _ensureAudio() {
+    if (this._ctx) return;
+    this._ctx  = new (window.AudioContext||window.webkitAudioContext)();
+    this._gain = this._ctx.createGain();
+    this._src  = this._ctx.createMediaElementSource(this.V);
+    this._src.connect(this._gain);
+    this._gain.connect(this._ctx.destination);
+  }
+
+  /* ── Quality ── */
+  _buildQ() {
+    const dd = document.getElementById('q-dd');
+    dd.innerHTML = '';
+    this.qualities.forEach((q,i) => {
+      const el = document.createElement('div');
+      el.className = 'qi' + (i===this.qIdx ? ' cur':'');
+      el.innerHTML = `<span>${q.quality.toUpperCase()}</span><span class="qb">${q.audio_type}</span>`;
+      el.onclick = e => { e.stopPropagation(); this.setQualityByIndex(i); document.getElementById('q-dd').classList.remove('open'); };
+      dd.appendChild(el);
+    });
+    const q = this.qualities[this.qIdx];
+    document.getElementById('q-lbl').textContent = q ? q.quality.toUpperCase() : '—';
+  }
+
+  _loadSrc(idx) {
+    const q = this.qualities[idx];
+    if (!q) return;
+    const t = this.V.currentTime, paused = this.V.paused;
+    this.V.src = BASE + '/stream/' + q.stream_token;
+    this.V.load();
+    this.V.addEventListener('loadedmetadata', () => {
+      if (t > 0.5) this.V.currentTime = t;
+      if (!paused) this.V.play().catch(()=>{});
+    }, {once:true});
+    document.getElementById('aud-badge').textContent = q.audio_type.toUpperCase();
+    this._buildQ();
+    dispatch('qualitychange', {index:idx, quality:q.quality, audioType:q.audio_type});
+  }
+
+  /* ── AniSkip ── */
+  async _fetchSkip() {
+    try {
+      const r = await fetch(`/api/aniskip?mal_id=${MAL_ID}&episode=${ED.episode}&episode_length=0`);
+      if (!r.ok) return;
+      const d = await r.json();
+      this.skipTimes = d.results || [];
+      dispatch('skipTimesLoaded', {skipTimes:this.skipTimes});
+    } catch(_){}
+  }
+
+  /* ── Skip check ── */
+  _checkSkip(t) {
+    const seg = this.skipTimes.find(s => t >= s.startTime && t < s.endTime - this.skipPad);
+    const btn = document.getElementById('skip-btn');
+    if (seg) {
+      if (this._skipShown !== seg.type) {
+        this._skipShown = seg.type;
+        document.getElementById('skip-lbl').textContent = seg.type==='op' ? 'Skip Intro' : 'Skip Outro';
+        btn.style.display = 'flex';
+        if (this.autoskip) this._doSkip(seg);
+      }
+    } else {
+      this._skipShown = null;
+      btn.style.display = 'none';
+    }
+  }
+
+  _doSkip(seg) {
+    this.V.currentTime = seg.endTime;
+    toast((seg.type==='op'?'Intro':'Outro') + ' skipped');
+    dispatch('skipused', {type:seg.type, skippedTo:seg.endTime});
+  }
+
+  /* ── Video events ── */
+  _bindVideo() {
+    const V = this.V;
+    V.addEventListener('timeupdate', () => {
+      const t=V.currentTime, d=V.duration||0;
+      document.getElementById('tc').textContent = fmt(t);
+      document.getElementById('ts-display').textContent = fmt(t)+' / '+fmt(d);
+      const p = d ? t/d*100 : 0;
+      document.getElementById('seek-fill').style.width = p+'%';
+      document.getElementById('seek-thumb').style.left  = p+'%';
+      this._checkSkip(t);
+      CCM.render(t);
+      dispatch('timeupdate', {currentTime:t, duration:d});
+    });
+    V.addEventListener('progress', () => {
+      if (!V.buffered.length || !V.duration) return;
+      document.getElementById('seek-buf').style.width =
+        (V.buffered.end(V.buffered.length-1)/V.duration*100)+'%';
+    });
+    V.addEventListener('durationchange', () => {
+      document.getElementById('td').textContent = fmt(V.duration);
+      document.getElementById('ts-display').textContent = fmt(V.currentTime)+' / '+fmt(V.duration);
+    });
+    V.addEventListener('waiting',  () => document.getElementById('spinner').style.display='flex');
+    V.addEventListener('canplay',  () => document.getElementById('spinner').style.display='none');
+    V.addEventListener('playing',  () => { document.getElementById('spinner').style.display='none'; this._updPlay(false); dispatch('play',{currentTime:V.currentTime}); });
+    V.addEventListener('pause',    () => { this._updPlay(true);  dispatch('pause',{currentTime:V.currentTime}); });
+    V.addEventListener('ended',    () => { this._updPlay(true);  dispatch('ended',{}); if(this.autoplay) dispatch('requestnext',{}); });
+  }
+
+  _updPlay(paused) {
+    document.getElementById('play-path').setAttribute('d',
+      paused ? 'M8 5v14l11-7z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+  }
+  _updVol() {
+    const muted = this.V.muted || this._volPct===0;
+    document.getElementById('vol-path').setAttribute('d',
+      muted
+        ? 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z'
+        : 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z'
+    );
+  }
+
+  /* ── UI ── */
+  _bindUI() {
+    const V=this.V, W=document.getElementById('W');
+
+    /* cursor / controls hide */
+    let hide;
+    const show = () => {
+      W.classList.add('show-ctrl','cursor-visible');
+      clearTimeout(hide);
+      hide = setTimeout(()=>{ if(!V.paused){ W.classList.remove('show-ctrl','cursor-visible'); }}, 3200);
+    };
+    W.addEventListener('mousemove', show);
+    W.addEventListener('touchstart', show, {passive:true});
+
+    /* click = play/pause, dbl = fullscreen */
+    V.addEventListener('click',    ()=>this._togglePlay());
+    V.addEventListener('dblclick', ()=>this._toggleFS());
+
+    /* flash */
+    V.addEventListener('click', ()=>{
+      const f=document.getElementById('flash'), p=document.getElementById('flash-path');
+      p.setAttribute('d', V.paused ? 'M8 5v14l11-7z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+      f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+    });
+
+    document.getElementById('btn-play').onclick = ()=>this._togglePlay();
+    document.getElementById('btn-m10').onclick  = ()=>this.seek(V.currentTime-10);
+    document.getElementById('btn-p10').onclick  = ()=>this.seek(V.currentTime+10);
+
+    /* Volume */
+    const vs=document.getElementById('vol-sl');
+    vs.oninput = ()=>this.setVolume(parseInt(vs.value));
+    document.getElementById('btn-mute').onclick = ()=>{ V.muted=!V.muted; this._updVol(); };
+
+    /* Seek drag */
+    const sb=document.getElementById('seek-bg'), sw=document.getElementById('seek');
+    const pos=e=>{ const r=sb.getBoundingClientRect(); return Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)); };
+    sw.addEventListener('mousedown', e=>{
+      this._drag=true; this._wasPaused=V.paused; V.pause();
+      V.currentTime = pos(e)*(V.duration||0);
+    });
+    window.addEventListener('mousemove', e=>{ if(this._drag) V.currentTime=pos(e)*(V.duration||0); });
+    window.addEventListener('mouseup',   ()=>{ if(this._drag){ this._drag=false; if(!this._wasPaused) V.play().catch(()=>{}); }});
+
+    /* Skip button */
+    document.getElementById('skip-btn').onclick = ()=>{
+      const seg=this.skipTimes.find(s=>V.currentTime>=s.startTime&&V.currentTime<s.endTime);
+      if(seg) this._doSkip(seg);
+    };
+
+    /* Quality dropdown */
+    const qLbl=document.getElementById('q-lbl'), qDd=document.getElementById('q-dd');
+    qLbl.onclick = e=>{ e.stopPropagation(); qDd.classList.toggle('open'); this._closeAllPanels('q-dd'); };
+
+    /* CC toggle */
+    document.getElementById('btn-cc').onclick = ()=>{
+      this.ccVisible = !this.ccVisible;
+      document.getElementById('btn-cc').classList.toggle('active', this.ccVisible);
+      if (!this.ccVisible) document.getElementById('sub-text').textContent='';
+      dispatch('ccvisibility', {visible:this.ccVisible});
+    };
+
+    /* PiP */
+    document.getElementById('btn-pip').onclick = async ()=>{
+      if (!document.pictureInPictureEnabled) { toast('PiP not supported'); return; }
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else await V.requestPictureInPicture().catch(()=>toast('PiP failed'));
+    };
+
+    /* Cast */
+    document.getElementById('btn-cast').onclick = ()=>{
+      if (window.chrome && chrome.cast) {
+        toast('Opening Cast dialog…');
+        // Cast SDK integration: dispatch event for site to handle
+        dispatch('cast', {streamUrl: V.src});
+      } else {
+        toast('Open this page in Chrome to cast to a TV');
+      }
+    };
+
+    /* Settings */
+    document.getElementById('btn-settings').onclick = e=>{
+      e.stopPropagation();
+      const sp=document.getElementById('settings-panel');
+      sp.classList.toggle('open');
+      this._closeAllPanels('settings-panel');
+    };
+
+    /* CC settings nav */
+    document.getElementById('open-cc-settings').onclick = e=>{
+      e.stopPropagation();
+      document.getElementById('settings-panel').classList.remove('open');
+      document.getElementById('cc-panel').classList.add('open');
+    };
+    document.getElementById('back-to-settings').onclick = e=>{
+      e.stopPropagation();
+      document.getElementById('cc-panel').classList.remove('open');
+      document.getElementById('settings-panel').classList.add('open');
+    };
+
+    /* CC settings inputs */
+    ['cc-size','cc-color','cc-bg-op','cc-font','cc-pos'].forEach(id=>{
+      document.getElementById(id).addEventListener('input', ()=>CCM.applySettings());
+      document.getElementById(id).addEventListener('change',()=>CCM.applySettings());
+    });
+    document.getElementById('cc-track-sel').onchange = e=>CCM.setActive(parseInt(e.target.value));
+
+    /* Settings toggles */
+    document.getElementById('tog-autoskip').onclick = ()=>this.setAutoskip(!this.autoskip);
+    document.getElementById('tog-autoplay').onclick = ()=>this.setAutoplay(!this.autoplay);
+    document.getElementById('inp-pad').onchange = e=>{ this.skipPad=parseFloat(e.target.value)||0; };
+    document.getElementById('sel-speed').onchange = e=>{ V.playbackRate=parseFloat(e.target.value); dispatch('speedchange',{speed:V.playbackRate}); };
+
+    /* Fullscreen */
+    document.getElementById('btn-fs').onclick = ()=>this._toggleFS();
+    document.addEventListener('fullscreenchange',()=>{
+      document.getElementById('fs-path').setAttribute('d',
+        document.fullscreenElement
+          ? 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z'
+          : 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'
+      );
+    });
+
+    /* Close on outside click */
+    document.addEventListener('click', ()=>{ qDd.classList.remove('open'); document.getElementById('settings-panel').classList.remove('open'); });
+
+    /* Keyboard */
+    document.addEventListener('keydown', e=>{
+      if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+      switch(e.key) {
+        case ' ': case 'k': e.preventDefault(); this._togglePlay(); break;
+        case 'ArrowRight': e.preventDefault(); this.seek(V.currentTime+(e.shiftKey?30:10)); break;
+        case 'ArrowLeft':  e.preventDefault(); this.seek(V.currentTime-(e.shiftKey?30:10)); break;
+        case 'ArrowUp':    e.preventDefault(); this.setVolume(Math.min(200,this._volPct+10)); break;
+        case 'ArrowDown':  e.preventDefault(); this.setVolume(Math.max(0,  this._volPct-10)); break;
+        case 'f': this._toggleFS(); break;
+        case 'm': V.muted=!V.muted; this._updVol(); break;
+        case 'c': document.getElementById('btn-cc').click(); break;
+        case 'i':
+        case 'o': { const s=this.skipTimes.find(x=>V.currentTime>=x.startTime&&V.currentTime<x.endTime); if(s) this._doSkip(s); break; }
+      }
+    });
+
+    /* postMessage (iframe control) */
+    window.addEventListener('message', e=>{
+      const d=e.data; if(!d||!d.type) return;
+      switch(d.type) {
+        case 'play':         this.play(); break;
+        case 'pause':        this.pause(); break;
+        case 'seek':         if(d.time!=null) this.seek(d.time); break;
+        case 'setvolume':    if(d.value!=null) this.setVolume(d.value); break;
+        case 'setautoskip':  this.setAutoskip(!!d.value); break;
+        case 'setautoplay':  this.setAutoplay(!!d.value); break;
+        case 'setquality':   if(d.index!=null) this.setQualityByIndex(d.index); break;
+        case 'setskiptimes': if(Array.isArray(d.times)) this.setSkipTimes(d.times); break;
+        case 'addtrack':     if(d.url) CCM.add(d.label||'Sub',d.lang||'en',d.url); break;
+        case 'getstate':     e.source&&e.source.postMessage({type:'state',state:this.getState()},'*'); break;
+      }
+    });
+  }
+
+  _closeAllPanels(except) {
+    ['q-dd','settings-panel','cc-panel'].forEach(id=>{
+      if(id!==except) document.getElementById(id).classList.remove('open');
+    });
+  }
+
+  _togglePlay() { if(this.V.paused) this.V.play().catch(()=>{}); else this.V.pause(); }
+  _toggleFS()   {
+    const el=document.getElementById('W');
+    if(!document.fullscreenElement) el.requestFullscreen().catch(()=>{});
+    else document.exitFullscreen();
+  }
+
+  /* ── Public API ── */
+  play()   { return this.V.play(); }
+  pause()  { this.V.pause(); }
+
+  seek(time) {
+    this.V.currentTime = Math.max(0, Math.min(time, this.V.duration||0));
+    dispatch('seek', {currentTime:this.V.currentTime});
+  }
+
+  getCurrentTime() { return this.V.currentTime; }
+  getDuration()    { return this.V.duration; }
+  isPaused()       { return this.V.paused; }
+
+  setVolume(pct) {
+    pct = Math.max(0, Math.min(200, Math.round(pct)));
+    this._volPct = pct;
+    const sl=document.getElementById('vol-sl');
+    sl.value=pct; sl.style.setProperty('--p',(pct/2)+'%');
+    document.getElementById('vol-pct').textContent=pct+'%';
+    if (pct > 100) {
+      this._ensureAudio();
+      this.V.volume=1;
+      this._gain.gain.value=pct/100;
+    } else {
+      if(this._gain) this._gain.gain.value=1;
+      this.V.volume=pct/100;
+    }
+    this.V.muted=(pct===0);
+    this._updVol();
+    dispatch('volumechange',{volume:pct});
+  }
+
+  getVolume() { return this._volPct; }
+
+  setQualityByIndex(idx) {
+    if(idx<0||idx>=this.qualities.length) return;
+    this.qIdx=idx; this._loadSrc(idx);
+  }
+
+  setQuality(audioType, quality) {
+    const idx=this.qualities.findIndex(q=>q.audio_type===audioType&&q.quality===quality);
+    if(idx>=0) this.setQualityByIndex(idx);
+  }
+
+  setAutoskip(v)  { this.autoskip=!!v;  document.getElementById('tog-autoskip').className='tog'+(v?' on':''); dispatch('autoskipchange',{autoskip:v}); }
+  setAutoplay(v)  { this.autoplay=!!v;  document.getElementById('tog-autoplay').className='tog'+(v?' on':''); dispatch('autoplaychange',{autoplay:v}); }
+
+  setSkipTimes(times) { this.skipTimes=times; dispatch('skipTimesLoaded',{skipTimes:times}); }
+  skipIntro()  { const s=this.skipTimes.find(x=>x.type==='op'); if(s) this._doSkip(s); }
+  skipOutro()  { const s=this.skipTimes.find(x=>x.type==='ed'); if(s) this._doSkip(s); }
+
+  addSubtitleTrack(url, lang='en', label='Subtitle') { return CCM.add(label, lang, url); }
+
+  setSkipPadding(s) { this.skipPad=s; document.getElementById('inp-pad').value=s; }
+
+  getState() {
+    return {
+      currentTime: this.getCurrentTime(),
+      duration:    this.getDuration(),
+      paused:      this.isPaused(),
+      volume:      this.getVolume(),
+      qIndex:      this.qIdx,
+      quality:     this.qualities[this.qIdx],
+      autoskip:    this.autoskip,
+      autoplay:    this.autoplay,
+      skipTimes:   this.skipTimes,
+      ccVisible:   this.ccVisible,
+      ccSettings:  CCM.settings,
+    };
+  }
+}
+
+/* ── Boot ── */
+window.TPlayer = new TsukuyomiPlayer();
+window.TPlayer.ccVisible = false; // attach CCM ref too
+window.CCM = CCM;
+</script>
+</body>
+</html>
