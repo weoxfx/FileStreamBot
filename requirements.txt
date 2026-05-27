@@ -7,3 +7,12 @@ aiofiles
 dnspython
 requests
 jinja2
+aiofiles
+aiohttp
+aiosqlite
+dnspython
+jinja2
+pyrofork
+python-dotenv
+requests
+tgcrypto
