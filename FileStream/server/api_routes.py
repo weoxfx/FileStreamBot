@@ -146,7 +146,6 @@ class_cache = {}
 
 
 @routes.get("/stream/{token}", allow_head=True)
-@_api_key_required
 async def stream_handler(request: web.Request):
     token = request.match_info["token"]
     try:
@@ -241,7 +240,6 @@ async def stream_handler(request: web.Request):
 
 
 @routes.get("/dl/{token}", allow_head=True)
-@_api_key_required
 async def download_handler(request: web.Request):
     """Same as /stream but forces Content-Disposition: attachment."""
     token = request.match_info["token"]
