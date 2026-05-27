@@ -8,6 +8,7 @@ import datetime
 
 from FileStream.utils.broadcast_helper import send_msg
 from FileStream.utils import bot_db
+from FileStream.utils.site_db import get_episode_by_token, delete_episode_by_token
 from FileStream.bot import FileStream
 from FileStream.config import Telegram, Server, Site
 from pyrogram import filters, Client
@@ -86,6 +87,60 @@ async def admin_apikey(c: Client, m: Message):
         f"Set `X-API-Key: {Site.API_KEY}` in your website requests.",
         parse_mode=ParseMode.MARKDOWN,
         quote=True
+    )
+
+
+@FileStream.on_message(filters.command("del") & filters.private & filters.user(Telegram.OWNER_ID))
+async def admin_del(c: Client, m: Message):
+    parts = m.text.split()
+    if len(parts) < 2:
+        await m.reply_text(
+            "**Usage:** `/del <stream_token>`\n\n"
+            "Looks up the episode by token, removes it from the database, "
+            "and deletes the file from the dump channel.",
+            parse_mode=ParseMode.MARKDOWN,
+            quote=True
+        )
+        return
+
+    token = parts[1].strip()
+    ep = await get_episode_by_token(token)
+    if not ep:
+        await m.reply_text(
+            f"No episode found with token `{token}`.",
+            parse_mode=ParseMode.MARKDOWN,
+            quote=True
+        )
+        return
+
+    info = (
+        f"**Found episode — deleting…**\n"
+        f"Anime: `{ep['anime_name']}`\n"
+        f"Season `{ep['season']}` · Episode `{ep['episode']}`\n"
+        f"Quality: `{ep['quality']}` · Audio: `{ep['audio_type']}`\n"
+        f"File size: `{ep.get('file_size', 0) // 1_000_000} MB`"
+    )
+    msg = await m.reply_text(info, parse_mode=ParseMode.MARKDOWN, quote=True)
+
+    deleted = await delete_episode_by_token(token)
+    if not deleted:
+        await msg.edit_text("❌ Delete failed — episode may have already been removed.")
+        return
+
+    dump_note = "n/a"
+    if ep.get("dump_msg_id") and ep.get("dump_channel_id"):
+        try:
+            await c.delete_messages(int(ep["dump_channel_id"]), int(ep["dump_msg_id"]))
+            dump_note = "deleted from channel"
+        except Exception:
+            dump_note = "could not delete from channel (no permission or already gone)"
+
+    await msg.edit_text(
+        f"✅ **Deleted:** `{ep['anime_name']}` "
+        f"S{str(ep['season']).zfill(2)}E{str(ep['episode']).zfill(2)} "
+        f"({ep['quality']} / {ep['audio_type']})\n"
+        f"Dump channel: {dump_note}",
+        parse_mode=ParseMode.MARKDOWN
     )
 
 

@@ -31,9 +31,9 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
     drawtext = (
         "drawtext="
         "text='Tsukuyomi':"
-        "fontsize=36:"
-        "fontcolor=white:"
-        "shadowcolor=black:"
+        "fontsize=28:"
+        "fontcolor=white@0.35:"
+        "shadowcolor=black@0.25:"
         "shadowx=2:"
         "shadowy=2:"
         "x=w-tw-24:"

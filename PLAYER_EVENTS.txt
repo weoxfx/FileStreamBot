@@ -1,0 +1,260 @@
+Tsukuyomi Player — postMessage Events Reference
+================================================
+
+The player runs inside an <iframe> and communicates with the parent page
+via window.postMessage.  All messages use plain objects (JSON-serialisable).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTBOUND EVENTS  (player → your site)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Listen on your page like this:
+
+    window.addEventListener('message', e => {
+        if (e.data.source !== 'tsukuyomi-player') return;
+        const { type, ...data } = e.data;
+        // handle type …
+    });
+
+Every outbound message has:
+    e.data.source  = 'tsukuyomi-player'   (always present, use to filter)
+    e.data.type    = one of the names below
+
+
+  type: 'ready'
+  ─────────────
+  Fired once when the player has finished initialising.
+  Fields:
+    episode    — the full episode metadata object (slug, season, episode,
+                 anime_name, qualities array, next_token, etc.)
+    qualities  — array of { quality, audio_type, stream_token, file_size }
+
+  type: 'play'
+  ────────────
+  Fired when playback starts or resumes.
+  Fields:
+    currentTime  — seconds
+
+  type: 'pause'
+  ─────────────
+  Fired when playback is paused (including autoplay-blocked pause).
+  Fields:
+    currentTime  — seconds
+
+  type: 'timeupdate'
+  ──────────────────
+  Fired approximately once per second while playing.
+  Fields:
+    currentTime  — seconds
+    duration     — total duration in seconds
+    percent      — 0–100 (how far through the video)
+
+  type: 'ended'
+  ─────────────
+  Fired when the video reaches its end.
+  Fields:
+    watchedSeconds  — total seconds of actual playback in this session
+
+  type: 'seek'
+  ────────────
+  Fired when the user (or your code) triggers a seek.
+  Fields:
+    currentTime  — the new position in seconds
+
+  type: 'seeking'
+  ───────────────
+  Fired each time the video element begins seeking (may fire rapidly).
+  Fields:
+    currentTime  — seconds
+
+  type: 'seeked'
+  ──────────────
+  Fired when the seek completes and the video is ready to play.
+  Fields:
+    currentTime  — seconds
+
+  type: 'qualitychange'
+  ─────────────────────
+  Fired when the user (or your code) switches quality.
+  Fields:
+    index      — 0-based index into the qualities array
+    quality    — e.g. '1080p'
+    audioType  — e.g. 'sub', 'dub'
+    token      — stream token for the selected quality
+
+  type: 'volumechange'
+  ────────────────────
+  Fired whenever the volume changes (including mute/unmute).
+  Fields:
+    volume  — 0–200  (100 = native 100%, 101–200 = software boost)
+
+  type: 'watchtime'
+  ─────────────────
+  Fired every 15 seconds of actual playback (useful for watch history).
+  Fields:
+    seconds  — cumulative playback seconds in this session
+    token    — stream token of the currently playing quality
+
+  type: 'skiptimes'
+  ─────────────────
+  Fired after AniSkip data is fetched for the episode.
+  Fields:
+    skipTimes  — array of { type ('op'/'ed'), startTime, endTime }
+
+  type: 'skipused'
+  ────────────────
+  Fired when an intro/outro skip is triggered (auto or manual).
+  Fields:
+    type     — 'op' (intro) or 'ed' (outro)
+    endTime  — the position the player jumped to
+
+  type: 'unmuted'
+  ───────────────
+  Fired the first time the user unmutes the player (autoplay workaround).
+  Fields:  (none)
+
+  type: 'error'
+  ─────────────
+  Fired when the video element reports a media error.
+  Fields:
+    code     — MediaError.code (1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC)
+    message  — MediaError.message string
+
+  type: 'requestnext'
+  ───────────────────
+  Fired at end of episode when autoplay is off, so your site can decide
+  whether to load the next episode.
+  Fields:
+    hasNext    — boolean
+    nextToken  — stream token of the next episode, or null
+
+  type: 'state'
+  ─────────────
+  Sent in response to an inbound 'getstate' command (see below).
+  Fields:
+    state.currentTime     — seconds
+    state.duration        — seconds
+    state.paused          — boolean
+    state.volume          — 0–200
+    state.muted           — boolean
+    state.qIndex          — current quality index
+    state.quality         — { quality, audio_type, stream_token }
+    state.autoskip        — boolean
+    state.autoplay        — boolean
+    state.skipTimes       — array
+    state.ccOn            — boolean
+    state.watchedSeconds  — seconds
+
+  type: 'ccsettings'
+  ──────────────────
+  Fired when the user changes subtitle appearance settings.
+  Fields:
+    cfg  — { size, color, bgOp, font, pos }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INBOUND COMMANDS  (your site → player)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Send to the iframe like this:
+
+    const iframe = document.querySelector('iframe');
+    iframe.contentWindow.postMessage({ type: 'play' }, '*');
+
+
+  { type: 'play' }
+  ─────────────────
+  Start / resume playback.
+
+  { type: 'pause' }
+  ──────────────────
+  Pause playback.
+
+  { type: 'seek', time: <seconds> }
+  ──────────────────────────────────
+  Jump to the given position (clamped to 0–duration).
+
+  { type: 'setvolume', value: <0–200> }
+  ──────────────────────────────────────
+  Set volume.  100 = 100 %, values above 100 apply a software gain boost.
+
+  { type: 'setquality', index: <number> }
+  ────────────────────────────────────────
+  Switch to the quality at that index in the qualities array.
+
+  { type: 'setautoskip', value: <boolean> }
+  ──────────────────────────────────────────
+  Enable or disable automatic intro/outro skipping.
+
+  { type: 'setautoplay', value: <boolean> }
+  ──────────────────────────────────────────
+  Enable or disable auto-advance to the next episode on end.
+
+  { type: 'setskiptimes', times: [ { type, startTime, endTime }, … ] }
+  ──────────────────────────────────────────────────────────────────────
+  Override the skip-time segments (replaces AniSkip data).
+
+  { type: 'addtrack', url: '...', label: 'English', lang: 'en' }
+  ────────────────────────────────────────────────────────────────
+  Add a subtitle track from a remote .vtt URL.
+  label  — display name shown in the CC panel
+  lang   — BCP-47 language tag
+
+  { type: 'loadthumbs', url: '...' }
+  ────────────────────────────────────
+  Load a WebVTT thumbnail sprite for the seek-bar preview.
+
+  { type: 'getstate' }
+  ─────────────────────
+  Request a full state snapshot.  The player replies with a 'state' event
+  (see outbound events above).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EMBED EXAMPLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    <iframe
+      id="tsukuyomi"
+      src="https://your-server.example.com/player/<stream_token>"
+      allow="autoplay; fullscreen; picture-in-picture"
+      style="border:none; width:100%; aspect-ratio:16/9">
+    </iframe>
+
+    <script>
+    const player = document.getElementById('tsukuyomi');
+
+    // Listen for events
+    window.addEventListener('message', e => {
+        if (e.data.source !== 'tsukuyomi-player') return;
+        console.log('[player]', e.data.type, e.data);
+    });
+
+    // Send commands
+    player.contentWindow.postMessage({ type: 'seek', time: 90 }, '*');
+    player.contentWindow.postMessage({ type: 'setvolume', value: 80 }, '*');
+    </script>
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+localStorage CACHING  (automatic — no action required)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The player automatically persists preferences in the viewer's browser:
+
+  Key: tsk_prefs
+  ──────────────
+  Stores global user preferences:
+    volume    — last set volume (0–200)
+    qIdx      — last chosen quality index
+    autoskip  — intro/outro skip toggle
+    autoplay  — auto-advance toggle
+
+  Key: tsk_r_<slug>_<season>_<episode>
+  ──────────────────────────────────────
+  Stores the resume position (seconds, integer) for each episode.
+  Saved every 10 seconds and on pause.
+  Cleared when the episode finishes (so it doesn't loop from the end).
+  On next visit, if saved position > 10 s and > 15 s before the end,
+  the player seeks there automatically and shows a toast: "Resumed from X:XX".

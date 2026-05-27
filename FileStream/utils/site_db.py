@@ -221,6 +221,46 @@ async def delete_episode_by_dump_msg(dump_msg_id: int, dump_channel_id: int) -> 
         return True
 
 
+async def delete_episode_by_token(token: str) -> Optional[dict]:
+    """
+    Delete an episode by stream token.
+    Also removes the parent anime row if it has no episodes left.
+    Returns the deleted episode dict, or None if not found.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT e.*, a.name as anime_name, a.slug as anime_slug
+               FROM episodes e JOIN anime a ON e.anime_id = a.id
+               WHERE e.stream_token = ?""",
+            (token,)
+        ) as cur:
+            row = await cur.fetchone()
+
+        if not row:
+            return None
+
+        data = dict(row)
+        anime_id = data["anime_id"]
+
+        await db.execute("DELETE FROM episodes WHERE stream_token = ?", (token,))
+
+        async with db.execute(
+            "SELECT COUNT(*) FROM episodes WHERE anime_id = ?", (anime_id,)
+        ) as cur:
+            count_row = await cur.fetchone()
+        if count_row and count_row[0] == 0:
+            await db.execute("DELETE FROM anime WHERE id = ?", (anime_id,))
+
+        await db.commit()
+        logger.info(
+            "Deleted episode token=%s  (%s S%sE%s %s/%s)",
+            token, data["anime_name"], data["season"], data["episode"],
+            data["audio_type"], data["quality"]
+        )
+        return data
+
+
 async def get_episode_by_dump_msg(dump_msg_id: int, dump_channel_id: int):
     """Look up an episode by its dump channel message ID."""
     async with aiosqlite.connect(DB_PATH) as db:

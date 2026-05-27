@@ -629,6 +629,30 @@ const WatchTime = {
 };
 
 /* ═══════════════════════════════════════════════════════════
+   localStorage Cache — resume position + user preferences
+═══════════════════════════════════════════════════════════ */
+const Cache = {
+  _pk:'tsk_prefs',
+  // Per-episode key uses slug+season+episode so it survives quality switches
+  _rk(){return`tsk_r_${ED.slug}_${ED.season}_${ED.episode}`;},
+  prefs(){
+    try{return JSON.parse(localStorage.getItem(this._pk)||'{}')}catch(_){return{};}
+  },
+  savePrefs(obj){
+    try{localStorage.setItem(this._pk,JSON.stringify({...this.prefs(),...obj}));}catch(_){}
+  },
+  savePos(t){
+    try{localStorage.setItem(this._rk(),String(Math.floor(t)));}catch(_){}
+  },
+  getPos(){
+    try{return parseFloat(localStorage.getItem(this._rk())||'0')||0;}catch(_){return 0;}
+  },
+  clearPos(){
+    try{localStorage.removeItem(this._rk());}catch(_){}
+  },
+};
+
+/* ═══════════════════════════════════════════════════════════
    Player
 ═══════════════════════════════════════════════════════════ */
 class Player {
@@ -649,6 +673,8 @@ class Player {
     this._skipShown = null;
     this._apTimer   = null;
     this._unmuted   = false;
+    this._rafPending= false;
+    this._resumeDone= false;
 
     this._buildQ();
     this._bindVideo();
@@ -657,6 +683,7 @@ class Player {
     this._bindTouch();
     this._bindKeys();
     this._bindMessages();
+    this._applyPrefs();
     this._startAutoplay();
 
     if(MAL_ID)this._fetchSkip();
@@ -664,6 +691,21 @@ class Player {
     if(ED.poster_url)Poster.init(ED.poster_url);
 
     emit('ready',{episode:ED,qualities:this.qualities});
+  }
+
+  /* ── Restore saved preferences ── */
+  _applyPrefs(){
+    const p=Cache.prefs();
+    // Volume
+    if(p.volume!=null)this.setVol(p.volume);
+    // Toggles
+    if(p.autoskip!=null)this.setAutoskip(p.autoskip);
+    if(p.autoplay!=null)this.setAutoplay(p.autoplay);
+    // Last-used quality index for this anime (if still valid)
+    if(p.qIdx!=null&&p.qIdx>0&&p.qIdx<this.qualities.length){
+      this.qIdx=p.qIdx;
+      this._loadSrc(p.qIdx,true);
+    }
   }
 
   /* ── Auto-start (muted) ── */
@@ -776,21 +818,30 @@ class Player {
     const V=this.V;
     let lastEmitTime=-1;
 
+    // Throttle DOM updates through rAF — prevents jank on slow devices
+    let _lastSaved=0;
     V.addEventListener('timeupdate',()=>{
-      const t=V.currentTime,d=V.duration||0;
-      $('tc').textContent=fmt(t);
-      const p=d?t/d*100:0;
-      $('seek-fill').style.width=p+'%';
-      $('seek-thumb').style.left=p+'%';
-      this._checkSkip(t);
-      CCM.render(t);
-      WatchTime.tick();
-      // Emit timeupdate to parent every second
-      if(Math.floor(t)!==lastEmitTime){
-        lastEmitTime=Math.floor(t);
-        emit('timeupdate',{currentTime:t,duration:d,percent:p});
-        this._postUp({type:'timeupdate',currentTime:t,duration:d,percent:p});
-      }
+      if(this._rafPending)return;
+      this._rafPending=true;
+      requestAnimationFrame(()=>{
+        this._rafPending=false;
+        const t=V.currentTime,d=V.duration||0;
+        $('tc').textContent=fmt(t);
+        const p=d?t/d*100:0;
+        $('seek-fill').style.width=p+'%';
+        $('seek-thumb').style.left=p+'%';
+        this._checkSkip(t);
+        CCM.render(t);
+        WatchTime.tick();
+        // Save resume position every 10 s of playback
+        if(t-_lastSaved>=10){_lastSaved=t;Cache.savePos(t);}
+        // Emit timeupdate to parent every second
+        if(Math.floor(t)!==lastEmitTime){
+          lastEmitTime=Math.floor(t);
+          emit('timeupdate',{currentTime:t,duration:d,percent:p});
+          this._postUp({type:'timeupdate',currentTime:t,duration:d,percent:p});
+        }
+      });
     });
 
     V.addEventListener('progress',()=>{
@@ -799,6 +850,17 @@ class Player {
     });
 
     V.addEventListener('durationchange',()=>{$('td').textContent=fmt(V.duration);});
+
+    // Resume from saved position (once per page load, after metadata is known)
+    V.addEventListener('loadedmetadata',()=>{
+      if(this._resumeDone)return;
+      this._resumeDone=true;
+      const saved=Cache.getPos();
+      if(saved>10&&saved<V.duration-15){
+        V.currentTime=saved;
+        toast('Resumed from '+fmt(saved),3000);
+      }
+    },{once:false});
 
     // Show spinner only while actually loading (not on buffered seeks)
     let _spinT;
@@ -828,12 +890,14 @@ class Player {
     V.addEventListener('pause',()=>{
       this._syncPlay();
       WatchTime.stop();
+      Cache.savePos(V.currentTime);
       emit('pause',{currentTime:V.currentTime});
       this._postUp({type:'pause',currentTime:V.currentTime});
     });
     V.addEventListener('ended',()=>{
       this._syncPlay();
       WatchTime.stop();
+      Cache.clearPos();
       emit('ended',{watchedSeconds:WatchTime.total()});
       this._postUp({type:'ended',watchedSeconds:WatchTime.total()});
       this._onEnded();
@@ -1258,17 +1322,19 @@ class Player {
     }
     this.V.muted=pct===0;
     this._syncVol();
+    Cache.savePrefs({volume:pct});
     emit('volumechange',{volume:pct});
   }
 
   setQuality(idx){
     if(idx<0||idx>=this.qualities.length)return;
     this.qIdx=idx;this._loadSrc(idx);
+    Cache.savePrefs({qIdx:idx});
     toast('Quality: '+this.qualities[idx].quality.toUpperCase());
   }
 
-  setAutoskip(v){this.autoskip=!!v;$('tog-skip').className='tog'+(v?' on':'');}
-  setAutoplay(v){this.autoplay=!!v;$('tog-ap').className='tog'+(v?' on':'');}
+  setAutoskip(v){this.autoskip=!!v;$('tog-skip').className='tog'+(v?' on':'');Cache.savePrefs({autoskip:!!v});}
+  setAutoplay(v){this.autoplay=!!v;$('tog-ap').className='tog'+(v?' on':'');Cache.savePrefs({autoplay:!!v});}
 
   addSubtitleTrack(url,lang='en',label='Subtitle'){return CCM.add(label,lang,url);}
   loadThumbnails(url){Thumb.load(url);}
