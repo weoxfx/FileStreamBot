@@ -881,7 +881,6 @@ class Player {
     V.addEventListener('timeupdate', () => {
       const t = V.currentTime, d = V.duration || 0;
       $('tc').textContent = fmt(t);
-      $('ts').textContent = fmt(t) + ' / ' + fmt(d);
       const p = d ? t / d * 100 : 0;
       $('seek-fill').style.width = p + '%';
       $('seek-thumb').style.left = p + '%';
