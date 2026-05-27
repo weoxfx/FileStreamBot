@@ -2,8 +2,8 @@
 ffmpeg watermark pipeline — burns a visible "Tsukuyomi" text watermark
 into the top-right corner of every video.
 
-Quality: libx264 CRF 17 (near-lossless, ~10% larger than CRF 23 default).
-Audio:   stream copy (zero audio quality loss).
+Quality: libx264 CRF 17 (near-lossless). Audio: stream copy.
+Falls back to stream-copy (no watermark) if libx264/drawtext unavailable.
 """
 import os
 import logging
@@ -14,35 +14,33 @@ from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
-_WM_TEXT   = "Tsukuyomi"
-_WM_COLOR  = "white@0.45"   # semi-transparent white
-_WM_SHADOW = "black@0.55"   # shadow for readability on any background
 
-
-def _build_ffmpeg_cmd(input_path: str, output_path: str) -> list:
+def _run_ffmpeg(input_path: str, output_path: str) -> bool:
     """
-    Burn a semi-transparent 'Tsukuyomi' watermark into the top-right corner.
-    Uses CRF 17 for near-lossless video quality; audio is stream-copied.
-
-    Requires ffmpeg with libx264 and freetype (drawtext) support.
-    Falls back to stream-copy if those are unavailable (watermark skipped).
+    Try watermark encode first, then stream-copy fallback.
+    Returns True when output_path is ready to upload.
     """
-    # font size = 3% of video height, clamped at reasonable bounds via ffmpeg expr
-    fontsize = "max(18\\,min(48\\,trunc(ih*0.033)))"
-    pad      = "max(10\\,trunc(ih*0.02))"           # right/top padding
+    # ── Step 1: probe file duration so ffmpeg doesn't hang ──────────────────
+    # Simple sanity check that the file is readable
+    if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+        logger.error("Input file missing or empty: %s", input_path)
+        return False
 
+    # ── Step 2: watermark with drawtext ─────────────────────────────────────
+    # Use simple hardcoded values — no expressions, no alpha syntax variants
     drawtext = (
-        f"drawtext="
-        f"text='{_WM_TEXT}':"
-        f"fontsize={fontsize}:"
-        f"fontcolor={_WM_COLOR}:"
-        f"shadowcolor={_WM_SHADOW}:"
-        f"shadowx=1:shadowy=1:"
-        f"x=w-tw-{pad}:"
-        f"y={pad}"
+        "drawtext="
+        "text='Tsukuyomi':"
+        "fontsize=36:"
+        "fontcolor=white:"
+        "shadowcolor=black:"
+        "shadowx=2:"
+        "shadowy=2:"
+        "x=w-tw-24:"
+        "y=24"
     )
 
-    return [
+    wm_cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
         "-vf", drawtext,
@@ -55,66 +53,66 @@ def _build_ffmpeg_cmd(input_path: str, output_path: str) -> list:
         output_path,
     ]
 
+    logger.info("ffmpeg watermark encode: %s", input_path)
+    try:
+        r = subprocess.run(
+            wm_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=7200,
+        )
+        if r.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info("Watermark encode succeeded")
+            return True
+        logger.warning(
+            "Watermark encode failed (rc=%d), stderr tail:\n%s",
+            r.returncode,
+            r.stderr.decode(errors="replace")[-800:],
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("ffmpeg watermark timed out")
+    except FileNotFoundError:
+        logger.error("ffmpeg not found on PATH")
+        return False
 
-def _build_fallback_cmd(input_path: str, output_path: str) -> list:
-    """Stream-copy fallback: no watermark, no quality loss."""
-    return [
+    # ── Step 3: stream-copy fallback (no watermark, no quality loss) ────────
+    logger.info("Falling back to stream-copy remux")
+    # Clean up any partial output from failed encode
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+
+    cp_cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
-        "-c:v", "copy",
-        "-c:a", "copy",
+        "-c", "copy",
         "-movflags", "+faststart",
         "-metadata", "title=Tsukuyomi",
         output_path,
     ]
-
-
-def _run_ffmpeg(input_path: str, output_path: str) -> bool:
-    """
-    Run the watermark ffmpeg command.
-    If drawtext/libx264 fails (missing filter or codec),
-    automatically retries with stream-copy fallback.
-    Returns True if a processed file exists at output_path.
-    """
-    cmd = _build_ffmpeg_cmd(input_path, output_path)
-    logger.info("ffmpeg watermark: %s → %s", input_path, output_path)
-
     try:
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=7200,
-        )
-        if result.returncode == 0 and os.path.exists(output_path):
-            logger.info("ffmpeg watermark succeeded")
-            return True
-
-        stderr = result.stderr.decode(errors="replace")
-        logger.warning("ffmpeg watermark failed (rc=%d), trying fallback.\n%s",
-                       result.returncode, stderr[-1500:])
-
-        # Retry with stream-copy (no watermark but no failure)
-        fallback = _build_fallback_cmd(input_path, output_path)
         r2 = subprocess.run(
-            fallback,
-            stdout=subprocess.PIPE,
+            cp_cmd,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             timeout=7200,
         )
-        if r2.returncode == 0 and os.path.exists(output_path):
-            logger.info("ffmpeg fallback (stream-copy) succeeded")
+        if r2.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info("Stream-copy fallback succeeded (no visible watermark)")
             return True
-
-        logger.error("ffmpeg fallback also failed:\n%s",
-                     r2.stderr.decode(errors="replace")[-1500:])
+        logger.error(
+            "Stream-copy also failed (rc=%d):\n%s",
+            r2.returncode,
+            r2.stderr.decode(errors="replace")[-800:],
+        )
         return False
-
     except subprocess.TimeoutExpired:
-        logger.error("ffmpeg timed out")
+        logger.error("ffmpeg stream-copy timed out")
         return False
     except FileNotFoundError:
-        logger.error("ffmpeg not found — uploading original without watermark")
+        logger.error("ffmpeg not found")
         return False
 
 
@@ -127,7 +125,7 @@ async def apply_watermark_and_upload(
     progress_cb=None,
 ) -> Tuple[Optional[int], Optional[str]]:
     """
-    Download → watermark (CRF 17 + drawtext) → faststart → upload to dump channel.
+    Download → watermark (CRF 17 + drawtext) → faststart → upload.
     Returns (message_id, file_id) or (None, None) on failure.
     """
     loop = asyncio.get_event_loop()

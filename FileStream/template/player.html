@@ -166,11 +166,10 @@ video{position:absolute;inset:0;width:100%;height:100%;
 #sp{position:absolute;bottom:calc(100% + 16px);transform:translateX(-50%);
   pointer-events:none;z-index:70;display:none;flex-direction:column;align-items:center;gap:4px}
 #sp.show{display:flex}
-#sp-img{width:152px;height:86px;background:#111 no-repeat center/cover;
+#sp-img{width:152px;height:86px;background:#111 center/cover no-repeat;
   border:2px solid var(--gold);border-radius:6px;overflow:hidden;
   box-shadow:0 4px 20px rgba(0,0,0,.6)}
-#sp-img img{width:100%;height:100%;object-fit:cover;display:block}
-#sp-img.no-th img{display:none}
+#sp-img.no-th{background-image:none!important;background-color:#1a1500}
 #sp-t{font-size:11px;color:#fff;background:rgba(0,0,0,.85);padding:2px 8px;border-radius:4px}
 
 /* Buttons row */
@@ -402,7 +401,7 @@ video{position:absolute;inset:0;width:100%;height:100%;
       <span class="tt" id="tc">0:00</span>
       <div id="seek">
         <div id="sp">
-          <div id="sp-img"><img id="sp-poster" src="" alt=""></div>
+          <div id="sp-img" class="no-th"></div>
           <div id="sp-t">0:00</div>
         </div>
         <div id="seek-bg">
@@ -485,18 +484,26 @@ const toast = (msg, ms=2200) => {
    Seek poster (lazy)
 ═══════════════════════════════════════════════════════════ */
 const Poster = {
-  _ok:false,
+  _url:'',
   init(url){
     if(!url)return;
     const img=new Image();
     img.onload=()=>{
-      const el=$('sp-poster');
-      if(el){el.src=url;this._ok=true;}
+      this._url=url;
+      // Pre-apply poster as background on the seek preview image div
+      const el=$('sp-img');
+      if(el){el.style.backgroundImage=`url('${url}')`;el.classList.remove('no-th');}
     };
+    img.onerror=()=>{};
     img.src=url;
   },
   apply(el){
-    this._ok ? el.classList.remove('no-th') : el.classList.add('no-th');
+    if(this._url){
+      el.style.backgroundImage=`url('${this._url}')`;
+      el.classList.remove('no-th');
+    } else {
+      el.classList.add('no-th');
+    }
   }
 };
 
@@ -793,11 +800,26 @@ class Player {
 
     V.addEventListener('durationchange',()=>{$('td').textContent=fmt(V.duration);});
 
-    V.addEventListener('waiting',()=>$('spinner').style.display='flex');
-    V.addEventListener('canplay',()=>$('spinner').style.display='none');
+    // Show spinner only while actually loading (not on buffered seeks)
+    let _spinT;
+    const showSpin=()=>{
+      clearTimeout(_spinT);
+      // Delay: if canplay fires within 400ms don't flash the spinner
+      _spinT=setTimeout(()=>$('spinner').style.display='flex',400);
+    };
+    const hideSpin=()=>{
+      clearTimeout(_spinT);
+      $('spinner').style.display='none';
+    };
+    V.addEventListener('waiting',showSpin);
+    V.addEventListener('canplay',hideSpin);
+    V.addEventListener('canplaythrough',hideSpin);
+    V.addEventListener('seeked',hideSpin);
+    // Safety net: never show spinner more than 8s without recovery
+    V.addEventListener('waiting',()=>setTimeout(hideSpin,8000));
 
     V.addEventListener('playing',()=>{
-      $('spinner').style.display='none';
+      hideSpin();
       this._syncPlay();
       WatchTime.start();
       emit('play',{currentTime:V.currentTime});
@@ -918,18 +940,33 @@ class Player {
     });
     sw.addEventListener('touchstart',e=>{
       e.stopPropagation();
+      e.preventDefault();
       this._seekDrag=true;this._wasPaused=this.V.paused;
       this.V.pause();sw.classList.add('active');
       const t=e.touches[0];
       this.V.currentTime=pct(t.clientX)*(this.V.duration||0);
       showPrev(pct(t.clientX),t.clientX);
-    },{passive:true});
-    window.addEventListener('touchmove',e=>{
-      if(!this._seekDrag)return;
+    },{passive:false});
+    sw.addEventListener('touchmove',e=>{
+      e.preventDefault();
       const t=e.touches[0];
       this.V.currentTime=pct(t.clientX)*(this.V.duration||0);
       showPrev(pct(t.clientX),t.clientX);
-    },{passive:true});
+    },{passive:false});
+    sw.addEventListener('touchend',e=>{
+      e.preventDefault();
+      if(!this._seekDrag)return;
+      this._seekDrag=false;sw.classList.remove('active');hidePrev();
+      if(!this._wasPaused)this.V.play().catch(()=>{});
+    },{passive:false});
+    // Also handle fingers that slide off the seek bar
+    window.addEventListener('touchmove',e=>{
+      if(!this._seekDrag)return;
+      e.preventDefault();
+      const t=e.touches[0];
+      this.V.currentTime=pct(t.clientX)*(this.V.duration||0);
+      showPrev(pct(t.clientX),t.clientX);
+    },{passive:false,capture:true});
     window.addEventListener('touchend',()=>{
       if(!this._seekDrag)return;
       this._seekDrag=false;sw.classList.remove('active');hidePrev();
