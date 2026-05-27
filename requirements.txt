@@ -2,7 +2,7 @@ aiohttp
 pyrofork
 python-dotenv
 tgcrypto
-motor
+aiosqlite
 aiofiles
 dnspython
 requests

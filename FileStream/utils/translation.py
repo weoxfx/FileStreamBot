@@ -1,72 +1,69 @@
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from FileStream.config import Telegram
 
+
 class LANG(object):
+    START_TEXT = (
+        "<b>👋 Hey, {}!</b>\n\n"
+        "<b>I'm the Tsukuyomi anime upload bot.</b>\n"
+        "Send me a video file with a caption in this format:\n\n"
+        "<code>Anime Name | Season | Episode | sub/dub/hsub | quality</code>\n\n"
+        "Example:\n"
+        "<code>Naruto | 1 | 2 | sub | 720p</code>\n\n"
+        "<b>@{}</b>"
+    )
 
-    START_TEXT = """
-<b>👋 Hᴇʏ, </b>{}\n 
-<b>I'ᴍ ᴛᴇʟᴇɢʀᴀᴍ ғɪʟᴇs sᴛʀᴇᴀᴍɪɴɢ ʙᴏᴛ ᴀs ᴡᴇʟʟ ᴅɪʀᴇᴄᴛ ʟɪɴᴋs ɢᴇɴᴇʀᴀᴛᴏʀ</b>\n
-<b>ᴡᴏʀᴋɪɴɢ ᴏɴ ᴄʜᴀɴɴᴇʟs ᴀɴᴅ ᴘʀɪᴠᴀᴛᴇ ᴄʜᴀᴛ</b>\n
-<b>💕 @{}</b>\n"""
+    HELP_TEXT = (
+        "<b>How to upload an anime episode:</b>\n\n"
+        "1. Send a video file with this caption:\n"
+        "   <code>Anime Name | Season | Episode | sub/dub/hsub | quality</code>\n\n"
+        "2. The bot will:\n"
+        "   • Apply the Tsukuyomi watermark\n"
+        "   • Upload to the dump channel\n"
+        "   • Give you a stream token for the website\n\n"
+        "<b>Audio types:</b> sub, dub, hsub, multi, raw\n"
+        "<b>Quality:</b> 360p, 480p, 720p, 1080p\n\n"
+        "Contact owner: <a href='tg://user?id={}'>[Owner]</a>"
+    )
 
-    HELP_TEXT = """
-<b>- ᴀᴅᴅ ᴍᴇ ᴀs ᴀɴ ᴀᴅᴍɪɴ ᴏɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ</b>
-<b>- sᴇɴᴅ ᴍᴇ ᴀɴʏ ᴅᴏᴄᴜᴍᴇɴᴛ ᴏʀ ᴍᴇᴅɪᴀ</b>
-<b>- ɪ'ʟʟ ᴘʀᴏᴠɪᴅᴇ sᴛʀᴇᴀᴍᴀʙʟᴇ ʟɪɴᴋ</b>\n
-<b>🔞 ᴀᴅᴜʟᴛ ᴄᴏɴᴛᴇɴᴛ sᴛʀɪᴄᴛʟʏ ᴘʀᴏʜɪʙɪᴛᴇᴅ.</b>\n
-<i><b> ʀᴇᴘᴏʀᴛ ʙᴜɢs ᴛᴏ <a href='https://telegram.me/AvishkarPatil'>ᴅᴇᴠᴇʟᴏᴘᴇʀ</a></b></i>"""
+    ABOUT_TEXT = (
+        "<b>⚜ Bot Name: {}</b>\n"
+        "<b>✦ Version: {}</b>\n"
+        "<b>✦ Watermark: Tsukuyomi</b>\n"
+        "<b>✦ DB: SQLite</b>\n"
+    )
 
-    ABOUT_TEXT = """
-<b>⚜ ᴍʏ ɴᴀᴍᴇ : {}</b>\n
-<b>✦ ᴠᴇʀsɪᴏɴ : {}</b>
-<b>✦ ᴜᴘᴅᴀᴛᴇᴅ ᴏɴ : 06-January-2024</b>
-<b>✦ ᴅᴇᴠᴇʟᴏᴘᴇʀ : <a href='https://telegram.me/AvishkarPatil'>Avishkar Patil</a></b>\n
-"""
-
-    STREAM_TEXT = """
-<i><u>𝗬𝗼𝘂𝗿 𝗟𝗶𝗻𝗸 𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗲𝗱 !</u></i>\n
-<b>📂 Fɪʟᴇ ɴᴀᴍᴇ :</b> <b>{}</b>\n
-<b>📦 Fɪʟᴇ ꜱɪᴢᴇ :</b> <code>{}</code>\n
-<b>📥 Dᴏᴡɴʟᴏᴀᴅ :</b> <code>{}</code>\n
-<b>🖥 Wᴀᴛᴄʜ :</b> <code>{}</code>\n
-<b>🔗 Sʜᴀʀᴇ :</b> <code>{}</code>\n"""
-
-    STREAM_TEXT_X = """
-<i><u>𝗬𝗼𝘂𝗿 𝗟𝗶𝗻𝗸 𝗚𝗲𝗻𝗲𝗿𝗮𝘁𝗲𝗱 !</u></i>\n
-<b>📂 Fɪʟᴇ ɴᴀᴍᴇ :</b> <b>{}</b>\n
-<b>📦 Fɪʟᴇ ꜱɪᴢᴇ :</b> <code>{}</code>\n
-<b>📥 Dᴏᴡɴʟᴏᴀᴅ :</b> <code>{}</code>\n
-<b>🔗 Sʜᴀʀᴇ :</b> <code>{}</code>\n"""
-
-
-    BAN_TEXT = "__Sᴏʀʀʏ Sɪʀ, Yᴏᴜ ᴀʀᴇ Bᴀɴɴᴇᴅ ᴛᴏ ᴜsᴇ ᴍᴇ.__\n\n**[Cᴏɴᴛᴀᴄᴛ Dᴇᴠᴇʟᴏᴘᴇʀ](tg://user?id={}) Tʜᴇʏ Wɪʟʟ Hᴇʟᴘ Yᴏᴜ**"
+    BAN_TEXT = (
+        "<i>You are banned from using this bot.</i>\n"
+        "<b><a href='tg://user?id={}'>Contact Owner</a></b>"
+    )
 
 
 class BUTTON(object):
-    START_BUTTONS = InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton('ʜᴇʟᴘ', callback_data='help'),
-            InlineKeyboardButton('ᴀʙᴏᴜᴛ', callback_data='about'),
-            InlineKeyboardButton('ᴄʟᴏsᴇ', callback_data='close')
+    START_PIC = getattr(Telegram, "START_PIC", None) or ""
+    UPDATES_CHANNEL = getattr(Telegram, "UPDATES_CHANNEL", "Telegram")
+
+    START_BUTTONS = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Help", callback_data="help"),
+            InlineKeyboardButton("About", callback_data="about"),
+            InlineKeyboardButton("Close", callback_data="close"),
         ],
-            [InlineKeyboardButton("📢 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ", url=f'https://t.me/{Telegram.UPDATES_CHANNEL}')]
-        ]
-    )
-    HELP_BUTTONS = InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton('ʜᴏᴍᴇ', callback_data='home'),
-            InlineKeyboardButton('ᴀʙᴏᴜᴛ', callback_data='about'),
-            InlineKeyboardButton('ᴄʟᴏsᴇ', callback_data='close'),
+        [InlineKeyboardButton("📢 Updates Channel", url=f"https://t.me/{UPDATES_CHANNEL}")],
+    ])
+    HELP_BUTTONS = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Home", callback_data="home"),
+            InlineKeyboardButton("About", callback_data="about"),
+            InlineKeyboardButton("Close", callback_data="close"),
         ],
-            [InlineKeyboardButton("📢 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ", url=f'https://t.me/{Telegram.UPDATES_CHANNEL}')]
-        ]
-    )
-    ABOUT_BUTTONS = InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton('ʜᴏᴍᴇ', callback_data='home'),
-            InlineKeyboardButton('ʜᴇʟᴘ', callback_data='help'),
-            InlineKeyboardButton('ᴄʟᴏsᴇ', callback_data='close'),
+        [InlineKeyboardButton("📢 Updates Channel", url=f"https://t.me/{UPDATES_CHANNEL}")],
+    ])
+    ABOUT_BUTTONS = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Home", callback_data="home"),
+            InlineKeyboardButton("Help", callback_data="help"),
+            InlineKeyboardButton("Close", callback_data="close"),
         ],
-            [InlineKeyboardButton("📢 ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ", url=f'https://t.me/{Telegram.UPDATES_CHANNEL}')]
-        ]
-    )
+        [InlineKeyboardButton("📢 Updates Channel", url=f"https://t.me/{UPDATES_CHANNEL}")],
+    ])

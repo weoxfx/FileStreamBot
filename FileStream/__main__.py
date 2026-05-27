@@ -3,6 +3,8 @@ import asyncio
 import logging
 import traceback
 import logging.handlers as handlers
+import os
+
 from FileStream.config import Telegram, Server
 from aiohttp import web
 from pyrogram import idle
@@ -10,13 +12,22 @@ from pyrogram import idle
 from FileStream.bot import FileStream
 from FileStream.server import web_server
 from FileStream.bot.clients import initialize_clients
+from FileStream.utils import bot_db, site_db
+
+os.makedirs("data", exist_ok=True)
+os.makedirs("logs", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     datefmt="%d/%m/%Y %H:%M:%S",
-    format='[%(asctime)s] {%(pathname)s:%(lineno)d} %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(stream=sys.stdout),
-              handlers.RotatingFileHandler("streambot.log", mode="a", maxBytes=104857600, backupCount=2, encoding="utf-8")],)
+    format="[%(asctime)s] {%(pathname)s:%(lineno)d} %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(stream=sys.stdout),
+        handlers.RotatingFileHandler(
+            "logs/streambot.log", mode="a", maxBytes=104857600, backupCount=2, encoding="utf-8"
+        ),
+    ],
+)
 
 logging.getLogger("aiohttp").setLevel(logging.ERROR)
 logging.getLogger("pyrogram").setLevel(logging.ERROR)
@@ -26,43 +37,44 @@ server = web.AppRunner(web_server())
 
 loop = asyncio.get_event_loop()
 
+
 async def start_services():
     print()
-    if Telegram.SECONDARY:
-        print("------------------ Starting as Secondary Server ------------------")
-    else:
-        print("------------------- Starting as Primary Server -------------------")
+    print("-------------- Tsukuyomi Bot Starting --------------")
     print()
-    print("-------------------- Initializing Telegram Bot --------------------")
 
+    print("Initializing databases...")
+    await bot_db.init_bot_db()
+    await site_db.init_site_db()
+    print("Databases ready.")
+    print()
 
+    print("Connecting Telegram bot...")
     await FileStream.start()
     bot_info = await FileStream.get_me()
     FileStream.id = bot_info.id
     FileStream.username = bot_info.username
-    FileStream.fname=bot_info.first_name
-    print("------------------------------ DONE ------------------------------")
+    FileStream.fname = bot_info.first_name
+    print(f"Bot: @{bot_info.username}")
     print()
-    print("---------------------- Initializing Clients ----------------------")
+
+    print("Initializing multi-clients...")
     await initialize_clients()
-    print("------------------------------ DONE ------------------------------")
     print()
-    print("--------------------- Initializing Web Server ---------------------")
+
+    print(f"Starting web server on {Server.BIND_ADDRESS}:{Server.PORT}...")
     await server.setup()
     await web.TCPSite(server, Server.BIND_ADDRESS, Server.PORT).start()
-    print("------------------------------ DONE ------------------------------")
+    print(f"Server URL: {Server.URL}")
     print()
-    print("------------------------- Service Started -------------------------")
-    print("                        bot =>> {}".format(bot_info.first_name))
-    if bot_info.dc_id:
-        print("                        DC ID =>> {}".format(str(bot_info.dc_id)))
-    print(" URL =>> {}".format(Server.URL))
-    print("------------------------------------------------------------------")
+    print("---------------- All Services Running ---------------")
     await idle()
+
 
 async def cleanup():
     await server.cleanup()
     await FileStream.stop()
+
 
 if __name__ == "__main__":
     try:
@@ -74,4 +86,4 @@ if __name__ == "__main__":
     finally:
         loop.run_until_complete(cleanup())
         loop.stop()
-        print("------------------------ Stopped Services ------------------------")
+        print("----------------- Services Stopped -----------------")
