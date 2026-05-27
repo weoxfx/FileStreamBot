@@ -521,7 +521,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 </div>
 <script>
 /* ── Injected data ── */
-const ED     = {{ episode_json }};
+const ED     = {{ episode_json | safe }};
 const MAL_ID = {{ mal_id }};
 const BASE   = window.location.origin;
 
