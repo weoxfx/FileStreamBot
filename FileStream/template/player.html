@@ -15,13 +15,76 @@
 html,body{width:100%;height:100%;background:#000;overflow:hidden;
   font-family:'Segoe UI',system-ui,sans-serif;color:#eee}
 
-/* wrapper */
+/* ── Wrapper ── */
 #W{position:relative;width:100vw;height:100dvh;display:flex;
   align-items:center;justify-content:center;background:#000;
   cursor:none;user-select:none;-webkit-user-select:none}
 #W.show-ui{cursor:default}
 
-video{width:100%;height:100%;object-fit:contain;display:block}
+video{position:absolute;inset:0;width:100%;height:100%;
+  object-fit:contain;display:block;z-index:1}
+
+/* ── Intro overlay (shown before first play) ── */
+#intro{
+  position:absolute;inset:0;z-index:20;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:0;
+  cursor:pointer;
+}
+#intro-bg{
+  position:absolute;inset:0;background:#000;
+  transition:opacity .5s;
+}
+#intro-poster{
+  position:absolute;inset:0;
+  background:center/cover no-repeat #000;
+  opacity:0;transition:opacity .6s;
+}
+#intro-vignette{
+  position:absolute;inset:0;
+  background:linear-gradient(to top,
+    rgba(0,0,0,.95) 0%,
+    rgba(0,0,0,.55) 40%,
+    rgba(0,0,0,.35) 100%);
+}
+#intro-content{
+  position:relative;z-index:2;
+  display:flex;flex-direction:column;
+  align-items:center;gap:18px;
+  padding:0 20px;max-width:640px;text-align:center;
+}
+#intro-meta{
+  font-size:12px;color:var(--gold);letter-spacing:1.5px;
+  text-transform:uppercase;font-weight:600;
+  opacity:.85;
+}
+#intro-title{
+  font-size:clamp(18px,4vw,32px);font-weight:700;
+  color:#fff;line-height:1.2;
+  text-shadow:0 2px 20px rgba(0,0,0,.8);
+}
+#intro-play{
+  width:72px;height:72px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--gold);
+  box-shadow:0 0 0 0 rgba(201,162,39,.5);
+  animation:pulse 2.2s infinite;
+  transition:transform .2s,box-shadow .2s;
+  flex-shrink:0;margin-top:4px;
+}
+#intro-play:hover{transform:scale(1.1);animation:none;
+  box-shadow:0 0 40px rgba(201,162,39,.6)}
+#intro-play svg{width:28px;height:28px;fill:#000;margin-left:4px}
+#intro-hint{
+  font-size:11px;color:rgba(255,255,255,.45);
+  letter-spacing:.5px;
+}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(201,162,39,.5)}
+  70%{box-shadow:0 0 0 18px rgba(201,162,39,0)}
+  100%{box-shadow:0 0 0 0 rgba(201,162,39,0)}
+}
+#intro.hidden{display:none}
 
 /* ── Skip intro ── */
 #skip-btn{
@@ -67,7 +130,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 }
 #flash.go{animation:flashAnim .36s ease-out forwards}
 
-/* ── Double-tap ripples (mobile) ── */
+/* ── Double-tap ripples ── */
 .dtap-ripple{
   position:absolute;top:50%;transform:translateY(-50%);
   pointer-events:none;z-index:20;display:flex;flex-direction:column;
@@ -108,12 +171,11 @@ video{width:100%;height:100%;object-fit:contain;display:block}
   position:absolute;inset:0;display:none;
   align-items:center;justify-content:center;
   flex-direction:column;gap:16px;z-index:55;
-  background:linear-gradient(135deg,rgba(0,0,0,.6) 0%,rgba(7,6,13,.5) 100%);
+  background:linear-gradient(135deg,rgba(0,0,0,.65) 0%,rgba(7,6,13,.55) 100%);
   backdrop-filter:blur(2px);
-  animation:fadeInOverlay .4s ease;
 }
 @keyframes fadeInOverlay{from{opacity:0}to{opacity:1}}
-#next-ep-overlay.show{display:flex}
+#next-ep-overlay.show{display:flex;animation:fadeInOverlay .4s ease}
 #next-ep-info{
   font-size:13px;color:rgba(255,255,255,.6);
   text-align:center;max-width:260px;line-height:1.5;
@@ -141,7 +203,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 #btn-replay:hover{background:rgba(255,255,255,.12);transform:scale(1.03)}
 #btn-replay svg{width:16px;height:16px;fill:#ccc}
 
-/* ── Autoplay countdown ── */
+/* ── Autoplay countdown bar ── */
 #autoplay-bar{
   position:absolute;bottom:0;left:0;right:0;height:3px;
   background:var(--gold);transform-origin:left;transform:scaleX(0);
@@ -151,9 +213,8 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 /* ── Controls bar ── */
 #ctrl{
   position:absolute;bottom:0;left:0;right:0;
-  padding:0 12px 12px;
-  background:linear-gradient(0deg,rgba(0,0,0,.88) 0%,transparent 100%);
-  backdrop-filter:blur(3px);
+  padding:0 12px 14px;
+  background:linear-gradient(0deg,rgba(0,0,0,.9) 0%,transparent 100%);
   display:flex;flex-direction:column;gap:6px;
   opacity:0;transition:opacity .22s;pointer-events:none;z-index:30;
 }
@@ -162,11 +223,12 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 /* Episode title bar */
 #ep-title{
   position:absolute;top:0;left:0;right:0;
-  padding:10px 14px;
-  background:linear-gradient(180deg,rgba(0,0,0,.80) 0%,transparent 100%);
-  font-size:13px;color:rgba(255,255,255,.85);font-weight:500;
+  padding:12px 16px;
+  background:linear-gradient(180deg,rgba(0,0,0,.82) 0%,transparent 100%);
+  font-size:13px;color:rgba(255,255,255,.88);font-weight:500;
   opacity:0;transition:opacity .22s;pointer-events:none;z-index:30;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  letter-spacing:.2px;
 }
 #W.show-ui #ep-title{opacity:1}
 
@@ -185,38 +247,40 @@ video{width:100%;height:100%;object-fit:contain;display:block}
   border-radius:4px;pointer-events:none;
 }
 #seek-buf{background:rgba(201,162,39,.25);width:0}
-#seek-fill{background:var(--gold);width:0}
+#seek-fill{background:var(--gold);width:0;
+  box-shadow:0 0 6px rgba(201,162,39,.4)}
 #seek-thumb{
   position:absolute;top:50%;
   width:14px;height:14px;background:var(--gold2);border-radius:50%;
   transform:translate(-50%,-50%) scale(0);
   transition:transform .12s;pointer-events:none;
-  box-shadow:0 0 6px var(--gold);
+  box-shadow:0 0 8px var(--gold);
 }
 #seek:hover #seek-thumb,#seek.active #seek-thumb{transform:translate(-50%,-50%) scale(1)}
 
 /* Seek preview */
 #seek-preview{
-  position:absolute;bottom:calc(100% + 12px);
+  position:absolute;bottom:calc(100% + 14px);
   transform:translateX(-50%);
   pointer-events:none;z-index:70;
-  display:none;flex-direction:column;align-items:center;gap:3px;
+  display:none;flex-direction:column;align-items:center;gap:4px;
 }
 #seek-preview.show{display:flex}
 #sp-img{
   width:152px;height:86px;
   background:#111 no-repeat center/cover;
-  border:2px solid var(--gold);border-radius:5px;
+  border:2px solid var(--gold);border-radius:6px;
   overflow:hidden;
+  box-shadow:0 4px 20px rgba(0,0,0,.6);
 }
 #sp-img img{width:100%;height:100%;object-fit:cover;display:block}
 #sp-img.no-thumb img{display:none}
 #sp-time{
   font-size:11px;color:#fff;
-  background:rgba(0,0,0,.82);padding:2px 8px;border-radius:4px;
+  background:rgba(0,0,0,.85);padding:2px 8px;border-radius:4px;
 }
 
-/* Buttons */
+/* Buttons row */
 #btn-row{display:flex;align-items:center;gap:1px;width:100%;flex-wrap:nowrap}
 .cb{
   background:none;border:none;color:var(--ctrl);cursor:pointer;
@@ -231,7 +295,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 .cb svg{width:20px;height:20px;fill:currentColor;pointer-events:none}
 .sp{flex:1}
 
-/* Vol */
+/* Volume */
 #vol-wrap{display:flex;align-items:center;gap:4px;flex-shrink:0}
 #vol-sl{
   -webkit-appearance:none;width:70px;height:4px;border-radius:4px;
@@ -249,13 +313,14 @@ video{width:100%;height:100%;object-fit:contain;display:block}
   padding:4px 10px;border:1px solid var(--bd);border-radius:5px;
   background:var(--glass);color:var(--gold2);
   font-size:12px;font-weight:700;cursor:pointer;user-select:none;
-  -webkit-tap-highlight-color:transparent;
+  -webkit-tap-highlight-color:transparent;letter-spacing:.3px;
 }
 #q-dd{
   display:none;position:absolute;bottom:calc(100% + 6px);right:0;
   background:var(--glass2);border:1px solid var(--bd);
   backdrop-filter:blur(18px);border-radius:var(--r);
-  min-width:160px;overflow:hidden;z-index:65;
+  min-width:165px;overflow:hidden;z-index:65;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);
 }
 #q-dd.open{display:block}
 .qi{
@@ -279,6 +344,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
   background:var(--glass2);border:1px solid var(--bd);
   backdrop-filter:blur(20px);border-radius:var(--r);
   padding:14px 16px;z-index:60;pointer-events:all;min-width:240px;
+  box-shadow:0 8px 40px rgba(0,0,0,.7);
 }
 .panel.open{display:block}
 #settings-panel,#cc-panel{bottom:74px;right:12px}
@@ -324,10 +390,10 @@ video{width:100%;height:100%;object-fit:contain;display:block}
 }
 .cb:hover::after{opacity:1}
 
-/* ─── Mobile ─── */
+/* ── Mobile ── */
 @media(max-width:640px),(pointer:coarse){
   #skip-btn{bottom:82px;right:10px;font-size:13px;padding:8px 14px}
-  #ctrl{padding:0 8px 10px;gap:3px}
+  #ctrl{padding:0 8px 12px;gap:3px}
   .tt{font-size:11px;min-width:30px}
   #seek{height:36px}
   #seek-bg{height:5px}
@@ -342,16 +408,33 @@ video{width:100%;height:100%;object-fit:contain;display:block}
   #sp-img{width:120px;height:68px}
   #sp-time{font-size:10px}
   #btn-next-ep{font-size:14px;padding:12px 22px}
+  #intro-play{width:62px;height:62px}
+  #intro-play svg{width:24px;height:24px}
 }
 </style>
 </head>
 <body>
 <div id="W">
 
-  <video id="V" preload="metadata" playsinline></video>
+  <video id="V" preload="none" playsinline></video>
 
-  <!-- Episode title -->
-  <div id="ep-title">{{ anime_name }} · S{{ '%02d'|format(season) }}E{{ '%02d'|format(episode) }} · {{ audio_type|upper }}</div>
+  <!-- Intro overlay — shown before first play -->
+  <div id="intro">
+    <div id="intro-bg"></div>
+    <div id="intro-poster"></div>
+    <div id="intro-vignette"></div>
+    <div id="intro-content">
+      <div id="intro-meta">Season {{ '%02d'|format(season) }} &nbsp;·&nbsp; Episode {{ '%02d'|format(episode) }} &nbsp;·&nbsp; {{ audio_type|upper }}</div>
+      <div id="intro-title">{{ anime_name }}</div>
+      <div id="intro-play">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <div id="intro-hint">TAP TO PLAY</div>
+    </div>
+  </div>
+
+  <!-- Episode title (shown in player while playing) -->
+  <div id="ep-title">{{ anime_name }} &nbsp;·&nbsp; S{{ '%02d'|format(season) }}E{{ '%02d'|format(episode) }} &nbsp;·&nbsp; {{ audio_type|upper }}</div>
 
   <!-- Double-tap ripples -->
   <div class="dtap-ripple" id="dtap-left">
@@ -378,7 +461,7 @@ video{width:100%;height:100%;object-fit:contain;display:block}
   <!-- Toast -->
   <div id="toast"></div>
 
-  <!-- Spinner -->
+  <!-- Spinner (shown while buffering after first play) -->
   <div id="spinner">
     <svg viewBox="0 0 24 24" fill="none" stroke="#C9A227" stroke-width="2.5">
       <circle cx="12" cy="12" r="10" stroke-opacity=".18"/>
@@ -544,21 +627,27 @@ const toast = (msg, ms = 2200) => {
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 };
 
-/* ── Seek preview poster (shows poster image while hovering seek bar) ── */
+/* ── Seek preview: poster image (lazy, non-blocking) ── */
 const SeekPoster = {
-  _url: null,
+  _loaded: false,
   init(url) {
-    this._url = url;
-    const img = $('sp-poster');
-    if (img && url) { img.src = url; }
+    if (!url) return;
+    const img = new Image();
+    img.onload = () => {
+      const el = $('sp-poster');
+      if (el) { el.src = url; this._loaded = true; }
+      const bg = $('intro-poster');
+      if (bg) { bg.style.backgroundImage = `url('${url}')`; bg.style.opacity = '1'; }
+    };
+    img.src = url;
   },
   apply(el) {
-    if (!this._url) { el.classList.add('no-thumb'); return; }
+    if (!this._loaded) { el.classList.add('no-thumb'); return; }
     el.classList.remove('no-thumb');
   }
 };
 
-/* ── Thumbnail VTT (sprite sheets) ── */
+/* ── Thumbnail VTT ── */
 const Thumb = {
   cues: [],
   load(url) {
@@ -568,9 +657,7 @@ const Thumb = {
     const dir = base.substring(0, base.lastIndexOf('/') + 1);
     const toSec = s => {
       const p = s.trim().split(':');
-      return p.length === 3
-        ? +p[0] * 3600 + +p[1] * 60 + parseFloat(p[2])
-        : +p[0] * 60 + parseFloat(p[1]);
+      return p.length === 3 ? +p[0] * 3600 + +p[1] * 60 + parseFloat(p[2]) : +p[0] * 60 + parseFloat(p[1]);
     };
     return txt.split(/\n\n+/).reduce((acc, b) => {
       const lines = b.trim().split('\n');
@@ -588,10 +675,7 @@ const Thumb = {
   },
   apply(t, el) {
     const c = this.cues.find(c => t >= c.st && t <= c.et);
-    if (!c) {
-      SeekPoster.apply(el);
-      return;
-    }
+    if (!c) { SeekPoster.apply(el); return; }
     el.classList.remove('no-thumb');
     el.style.backgroundImage = `url('${c.url}')`;
     if (c.w) {
@@ -616,10 +700,7 @@ const CCM = {
     o.value = i; o.textContent = `${label} (${lang})`; sel.appendChild(o);
     return i;
   },
-  setActive(i) {
-    this.idx = parseInt(i); $('cc-track').value = i;
-    emit('ccchange', { index: i });
-  },
+  setActive(i) { this.idx = parseInt(i); $('cc-track').value = i; emit('ccchange', { index: i }); },
   render(t) {
     const span = $('sub-text');
     if (this.idx < 0 || !P.ccOn) { span.textContent = ''; return; }
@@ -678,20 +759,41 @@ class Player {
     this._actx = this._gain = this._asrc = null;
     this._skipShown = null;
     this._autoplayTimer = null;
+    this._started = false;
 
     this._buildQ();
-    this._loadSrc(0);
     this._bindVideo();
     this._bindSeek();
     this._bindControls();
     this._bindTouch();
     this._bindKeys();
     this._bindMessages();
+    this._bindIntro();
 
     if (MAL_ID) this._fetchSkip();
     if (ED.thumbnails_url) Thumb.load(ED.thumbnails_url);
+    /* Load poster lazily — does not block video loading at all */
     if (ED.poster_url) SeekPoster.init(ED.poster_url);
     emit('ready', {});
+  }
+
+  /* ── Intro overlay ── */
+  _bindIntro() {
+    const intro = $('intro');
+    const doPlay = () => {
+      if (this._started) return;
+      this._started = true;
+      intro.classList.add('hidden');
+      this._loadSrc(this.qIdx);
+      this.V.play().catch(() => {});
+      emit('firstplay', {});
+    };
+    intro.addEventListener('click', doPlay);
+    /* Also allow space/enter to start from intro state */
+    document.addEventListener('keydown', e => {
+      if (this._started) return;
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); doPlay(); }
+    }, { once: false });
   }
 
   /* ── Audio boost ── */
@@ -791,34 +893,28 @@ class Player {
       if (!V.buffered.length || !V.duration) return;
       $('seek-buf').style.width = (V.buffered.end(V.buffered.length - 1) / V.duration * 100) + '%';
     });
-    V.addEventListener('durationchange', () => {
-      $('td').textContent = fmt(V.duration);
-    });
-    V.addEventListener('waiting',  () => $('spinner').style.display = 'flex');
+    V.addEventListener('durationchange', () => { $('td').textContent = fmt(V.duration); });
+    V.addEventListener('waiting',  () => { if (this._started) $('spinner').style.display = 'flex'; });
     V.addEventListener('canplay',  () => $('spinner').style.display = 'none');
-    V.addEventListener('playing',  () => { $('spinner').style.display = 'none'; this._syncPlay(); emit('play', {}); });
-    V.addEventListener('pause',    () => { this._syncPlay(); emit('pause', {}); });
-    V.addEventListener('ended',    () => {
+    V.addEventListener('playing',  () => {
+      $('spinner').style.display = 'none';
       this._syncPlay();
-      this._onEnded();
-      emit('ended', {});
+      emit('play', {});
     });
+    V.addEventListener('pause',  () => { this._syncPlay(); emit('pause', {}); });
+    V.addEventListener('ended',  () => { this._syncPlay(); this._onEnded(); emit('ended', {}); });
   }
 
   _onEnded() {
     const overlay = $('next-ep-overlay');
     const nextToken = ED.next_token;
-
     if (nextToken) {
-      // Build info text
       const info = `${ED.anime_name} · S${String(ED.season).padStart(2,'0')}E${String(ED.episode + 1).padStart(2,'0')}`;
       $('next-ep-info').textContent = info;
     } else {
       $('next-ep-info').textContent = 'No next episode available.';
     }
-
     overlay.classList.add('show');
-
     if (this.autoplay && nextToken) {
       this._startAutoplay(nextToken);
     } else {
@@ -847,8 +943,7 @@ class Player {
 
   _cancelAutoplay() {
     clearTimeout(this._autoplayTimer);
-    const bar = $('autoplay-bar');
-    bar.style.display = 'none';
+    $('autoplay-bar').style.display = 'none';
   }
 
   _syncPlay() {
@@ -874,7 +969,6 @@ class Player {
       const r = sb.getBoundingClientRect();
       return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
     };
-
     const showPrev = (p, clientX) => {
       const t = p * (this.V.duration || 0);
       ptime.textContent = fmt(t);
@@ -886,7 +980,6 @@ class Player {
     };
     const hidePrev = () => prev.classList.remove('show');
 
-    /* Mouse */
     sw.addEventListener('mousemove', e => { if (!this._seekDrag) showPrev(pct(e.clientX), e.clientX); });
     sw.addEventListener('mouseleave', () => { if (!this._seekDrag) hidePrev(); });
     sw.addEventListener('mousedown', e => {
@@ -907,7 +1000,6 @@ class Player {
       if (!this._wasPaused) this.V.play().catch(() => {});
     });
 
-    /* Touch */
     sw.addEventListener('touchstart', e => {
       e.stopPropagation();
       this._seekDrag = true; this._wasPaused = this.V.paused;
@@ -933,7 +1025,6 @@ class Player {
   _bindControls() {
     const W = this.W, V = this.V;
 
-    /* Show controls on mouse move */
     let hideTimer;
     const showCtrl = () => {
       W.classList.add('show-ui');
@@ -942,9 +1033,8 @@ class Player {
     };
     W.addEventListener('mousemove', showCtrl);
 
-    /* Click on wrapper = play/pause (not on controls/panels/buttons) */
     W.addEventListener('click', e => {
-      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay')) return;
+      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay,#intro')) return;
       this._closePanels(null);
       this._togglePlay();
       const f = $('flash'), p = $('flash-path');
@@ -952,14 +1042,15 @@ class Player {
       f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
     });
 
-    /* Dblclick = fullscreen (desktop) */
     W.addEventListener('dblclick', e => {
-      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay')) return;
+      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay,#intro')) return;
       this._toggleFS();
     });
 
-    /* Buttons */
-    $('btn-play').onclick = () => this._togglePlay();
+    $('btn-play').onclick = () => {
+      if (!this._started) { $('intro').click(); return; }
+      this._togglePlay();
+    };
     $('btn-m10').onclick  = () => this.seek(V.currentTime - 10);
     $('btn-p10').onclick  = () => this.seek(V.currentTime + 10);
     $('btn-mute').onclick = () => { V.muted = !V.muted; this._syncVol(); };
@@ -973,7 +1064,6 @@ class Player {
       if (s) this._doSkip(s);
     };
 
-    /* Quality dropdown — stopPropagation so document click doesn't close it */
     const ql = $('q-lbl'), qd = $('q-dd');
     ql.addEventListener('click', e => {
       e.stopPropagation();
@@ -983,7 +1073,6 @@ class Player {
     });
     qd.addEventListener('click', e => e.stopPropagation());
 
-    /* CC */
     $('btn-cc').onclick = e => {
       e.stopPropagation();
       this.ccOn = !this.ccOn;
@@ -992,7 +1081,6 @@ class Player {
       emit('ccvisibility', { visible: this.ccOn });
     };
 
-    /* PiP */
     $('btn-pip').onclick = async e => {
       e.stopPropagation();
       if (!document.pictureInPictureEnabled) { toast('PiP not supported'); return; }
@@ -1001,7 +1089,6 @@ class Player {
         : await V.requestPictureInPicture().catch(() => toast('PiP failed'));
     };
 
-    /* Settings — stopPropagation prevents document click from instantly closing */
     $('btn-set').addEventListener('click', e => {
       e.stopPropagation();
       const wasOpen = $('settings-panel').classList.contains('open');
@@ -1031,7 +1118,6 @@ class Player {
     $('inp-pad').onchange = e => { this.skipPad = parseFloat(e.target.value) || 0; };
     $('sel-speed').onchange = e => { V.playbackRate = +e.target.value; emit('speedchange', { speed: V.playbackRate }); };
 
-    /* Fullscreen */
     $('btn-fs').onclick = e => { e.stopPropagation(); this._toggleFS(); };
     document.addEventListener('fullscreenchange', () => {
       $('fs-ico').setAttribute('d', document.fullscreenElement
@@ -1039,16 +1125,12 @@ class Player {
         : 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z');
     });
 
-    /* Next ep overlay */
     $('btn-next-ep').onclick = e => {
       e.stopPropagation();
       this._cancelAutoplay();
       $('next-ep-overlay').classList.remove('show');
-      if (ED.next_token) {
-        window.location.href = BASE + '/player/' + ED.next_token;
-      } else {
-        emit('requestnext', {});
-      }
+      if (ED.next_token) window.location.href = BASE + '/player/' + ED.next_token;
+      else emit('requestnext', {});
     };
     $('btn-replay').onclick = e => {
       e.stopPropagation();
@@ -1057,11 +1139,8 @@ class Player {
       V.currentTime = 0; V.play().catch(() => {});
     };
 
-    /* ── FIXED: Close panels only on genuine outside click ── */
     document.addEventListener('click', e => {
-      if (!e.target.closest('#q-wrap')) {
-        $('q-dd').classList.remove('open');
-      }
+      if (!e.target.closest('#q-wrap')) $('q-dd').classList.remove('open');
       if (!e.target.closest('#settings-panel') && !e.target.closest('#btn-set') &&
           !e.target.closest('#cc-panel') && !e.target.closest('#open-cc')) {
         $('settings-panel').classList.remove('open');
@@ -1070,21 +1149,18 @@ class Player {
     });
   }
 
-  /* ── Touch (mobile gestures) ── */
+  /* ── Touch gestures ── */
   _bindTouch() {
     const W = this.W, V = this.V;
     let showTimer;
 
-    /* Show controls on touch */
     W.addEventListener('touchstart', e => {
-      /* Don't interfere with panel interactions */
-      if (e.target.closest('.panel,#q-dd,#q-wrap,#btn-set,#skip-btn,#next-ep-overlay,#ctrl')) return;
+      if (e.target.closest('.panel,#q-dd,#q-wrap,#btn-set,#skip-btn,#next-ep-overlay,#ctrl,#intro')) return;
       W.classList.add('show-ui');
       clearTimeout(showTimer);
       showTimer = setTimeout(() => { if (!V.paused) W.classList.remove('show-ui'); }, 3500);
     }, { passive: true });
 
-    /* Close panels on touch outside (but not on controls) */
     W.addEventListener('touchstart', e => {
       if (!e.target.closest('#q-wrap,#q-dd')) $('q-dd').classList.remove('open');
       if (!e.target.closest('#settings-panel,#btn-set,#cc-panel,#open-cc,#cc-back')) {
@@ -1093,20 +1169,16 @@ class Player {
       }
     }, { passive: true });
 
-    /* Double-tap seek */
     let lastTap = 0, lastSide = null;
     W.addEventListener('touchend', e => {
       if (this._seekDrag) return;
-      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay,#btn-set,#q-wrap')) return;
+      if (e.target.closest('#ctrl,#skip-btn,.panel,#q-dd,#next-ep-overlay,#btn-set,#q-wrap,#intro')) return;
       const touch = e.changedTouches[0];
       const ww = window.innerWidth;
       const x = touch.clientX, y = touch.clientY;
-
       if (y >= $('ctrl').getBoundingClientRect().top) return;
-
       const now = Date.now();
       const side = x < ww * 0.38 ? 'left' : x > ww * 0.62 ? 'right' : 'center';
-
       if ((now - lastTap) < 350 && side === lastSide && side !== 'center') {
         lastTap = 0; lastSide = null;
         if (side === 'left')  { this.seek(V.currentTime - 10); this._ripple('dtap-left'); }
@@ -1122,10 +1194,9 @@ class Player {
       }
     }, { passive: true });
 
-    /* Swipe up/down (center) = volume */
     let sy = null, sv = null, swiping = false;
     W.addEventListener('touchstart', e => {
-      if (e.target.closest('#ctrl,.panel,#q-dd,#next-ep-overlay')) return;
+      if (e.target.closest('#ctrl,.panel,#q-dd,#next-ep-overlay,#intro')) return;
       const t = e.touches[0];
       const ww = window.innerWidth;
       if (t.clientX < ww * 0.38 || t.clientX > ww * 0.62) return;
@@ -1140,9 +1211,8 @@ class Player {
       if (!swiping) return;
       const nv = Math.max(0, Math.min(200, Math.round(sv + dy / window.innerHeight * 200)));
       this.setVol(nv);
-      const ind = $('vol-indicator');
       $('vol-ind-val').textContent = nv + '%';
-      ind.classList.add('show');
+      $('vol-indicator').classList.add('show');
     }, { passive: true });
 
     W.addEventListener('touchend', () => {
@@ -1162,7 +1232,10 @@ class Player {
     document.addEventListener('keydown', e => {
       if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
       switch (e.key) {
-        case ' ': case 'k': e.preventDefault(); this._togglePlay(); break;
+        case ' ': case 'k':
+          e.preventDefault();
+          if (!this._started) { $('intro').click(); return; }
+          this._togglePlay(); break;
         case 'ArrowRight': e.preventDefault(); this.seek(V.currentTime + (e.shiftKey ? 30 : 10)); break;
         case 'ArrowLeft':  e.preventDefault(); this.seek(V.currentTime - (e.shiftKey ? 30 : 10)); break;
         case 'ArrowUp':    e.preventDefault(); this.setVol(Math.min(200, this._volPct + 10)); break;
@@ -1199,7 +1272,10 @@ class Player {
   }
 
   /* ── Internals ── */
-  _togglePlay() { this.V.paused ? this.V.play().catch(() => {}) : this.V.pause(); }
+  _togglePlay() {
+    if (!this._started) return;
+    this.V.paused ? this.V.play().catch(() => {}) : this.V.pause();
+  }
   _toggleFS() {
     if (!document.fullscreenElement) {
       this.W.requestFullscreen().catch(() => {});
@@ -1216,10 +1292,11 @@ class Player {
   }
 
   /* ── Public API ── */
-  play()   { return this.V.play(); }
-  pause()  { this.V.pause(); }
+  play()  { if (!this._started) { $('intro').click(); return Promise.resolve(); } return this.V.play(); }
+  pause() { this.V.pause(); }
 
   seek(t) {
+    if (!this._started) return;
     this.V.currentTime = Math.max(0, Math.min(t, this.V.duration || 0));
     emit('seek', { currentTime: this.V.currentTime });
   }
