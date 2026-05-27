@@ -1,17 +1,14 @@
 from __future__ import annotations
 import logging
 from datetime import datetime
-from pyrogram import Client
-from typing import Any, Optional
-
-from pyrogram.enums import ParseMode, ChatType
+from typing import Optional, Any
 from pyrogram.types import Message
 from pyrogram.file_id import FileId
 
 logger = logging.getLogger(__name__)
 
 
-def get_media_from_message(message: "Message") -> Any:
+def get_media_from_message(message: Message) -> Any:
     media_types = (
         "audio", "document", "photo", "sticker",
         "animation", "video", "voice", "video_note",
@@ -27,7 +24,7 @@ def get_media_file_size(m):
     return getattr(media, "file_size", "None")
 
 
-def get_name(media_msg: "Message | FileId") -> str:
+def get_name(media_msg) -> str:
     if isinstance(media_msg, Message):
         media = get_media_from_message(media_msg)
         file_name = getattr(media, "file_name", "")
@@ -52,12 +49,13 @@ def get_name(media_msg: "Message | FileId") -> str:
         ext = formats.get(media_type)
         ext = "." + ext if ext else ""
         date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        file_name = f"{media_type}-{date}{ext}"
+        file_name = "{}-{}{}".format(media_type, date, ext)
 
     return file_name
 
 
 def get_file_info(message: Message) -> dict:
+    from pyrogram.enums import ChatType
     media = get_media_from_message(message)
     if message.chat.type == ChatType.PRIVATE:
         user_idx = message.from_user.id
@@ -73,10 +71,7 @@ def get_file_info(message: Message) -> dict:
     }
 
 
-async def get_file_ids(client: "Client | bool", db_id, multi_clients, message) -> Optional[FileId]:
-    """
-    Stub kept for ByteStreamer compatibility.
-    In the new architecture, streaming goes through the dump channel directly.
-    """
-    logger.debug("get_file_ids called — new architecture uses dump channel directly")
+async def get_file_ids(client, db_id, multi_clients, message) -> Optional[FileId]:
+    """Stub kept for ByteStreamer compatibility."""
+    logger.debug("get_file_ids stub called — new architecture uses dump channel directly")
     return None

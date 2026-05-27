@@ -9,6 +9,7 @@ import hashlib
 import base64
 import logging
 import aiosqlite
+from typing import Optional, List
 from FileStream.config import SiteDB, Site
 
 logger = logging.getLogger(__name__)
@@ -50,22 +51,22 @@ async def init_site_db():
     logger.info("Site DB initialized at %s", DB_PATH)
 
 
-def _make_token(anime_slug: str, season: int, episode: int, audio_type: str, quality: str) -> str:
+def _make_token(anime_slug, season, episode, audio_type, quality):
     """
     Generate an HMAC-signed, obfuscated stream token.
     Non-guessable — the site uses this to request streams.
     """
-    payload = f"{anime_slug}:{season}:{episode}:{audio_type}:{quality}:{int(time.time())}"
+    payload = "{}:{}:{}:{}:{}:{}".format(anime_slug, season, episode, audio_type, quality, int(time.time()))
     sig = hmac.HMAC(
         Site.STREAM_SECRET.encode(),
         payload.encode(),
         hashlib.sha256
     ).hexdigest()[:24]
     rand = base64.urlsafe_b64encode(os.urandom(6)).decode().rstrip("=")
-    return f"{rand}{sig}"
+    return "{}{}".format(rand, sig)
 
 
-async def get_or_create_anime(name: str, slug: str) -> int:
+async def get_or_create_anime(name, slug):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT id FROM anime WHERE slug = ?", (slug,)) as cur:
             row = await cur.fetchone()
@@ -80,16 +81,16 @@ async def get_or_create_anime(name: str, slug: str) -> int:
 
 
 async def upsert_episode(
-    anime_id: int,
-    season: int,
-    episode: int,
-    audio_type: str,
-    quality: str,
-    dump_msg_id: int,
-    dump_channel_id: int,
-    file_size: int,
-    anime_slug: str,
-) -> str:
+    anime_id,
+    season,
+    episode,
+    audio_type,
+    quality,
+    dump_msg_id,
+    dump_channel_id,
+    file_size,
+    anime_slug,
+):
     """Insert or replace an episode. Returns the stream token."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -120,7 +121,7 @@ async def upsert_episode(
         return token
 
 
-async def get_episode_by_token(token: str) -> dict | None:
+async def get_episode_by_token(token):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -133,7 +134,7 @@ async def get_episode_by_token(token: str) -> dict | None:
             return dict(row) if row else None
 
 
-async def get_anime_list() -> list:
+async def get_anime_list():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
@@ -147,7 +148,7 @@ async def get_anime_list() -> list:
             return [dict(r) for r in rows]
 
 
-async def get_episodes_for_anime(slug: str, season: int = None) -> list:
+async def get_episodes_for_anime(slug, season=None):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if season is not None:
@@ -173,7 +174,7 @@ async def get_episodes_for_anime(slug: str, season: int = None) -> list:
         return [dict(r) for r in rows]
 
 
-async def get_episode_qualities(slug: str, season: int, episode: int) -> list:
+async def get_episode_qualities(slug, season, episode):
     """Return all available quality options for one episode (for the site quality picker)."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row

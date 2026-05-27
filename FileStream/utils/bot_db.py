@@ -5,6 +5,7 @@ Separate from the site DB (site_db.py).
 import time
 import logging
 import aiosqlite
+from typing import Optional, List
 from FileStream.config import BotDB
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ async def add_user(user_id: int):
         await db.commit()
 
 
-async def get_user(user_id: int) -> dict | None:
+async def get_user(user_id: int) -> Optional[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM users WHERE id = ?", (user_id,)) as cur:
@@ -71,6 +72,10 @@ async def user_exists(user_id: int) -> bool:
 
 async def ban_user(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO users (id, join_date, is_banned) VALUES (?, ?, 1)",
+            (user_id, time.time())
+        )
         await db.execute("UPDATE users SET is_banned = 1 WHERE id = ?", (user_id,))
         await db.commit()
 
@@ -114,7 +119,7 @@ async def get_banned_count() -> int:
             return row[0] if row else 0
 
 
-async def get_all_users() -> list[dict]:
+async def get_all_users() -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM users WHERE is_banned = 0") as cur:
@@ -128,8 +133,8 @@ async def log_file(
     file_name: str,
     file_size: int,
     mime_type: str,
-    flog_msg_id: int | None = None,
-    dump_msg_id: int | None = None,
+    flog_msg_id: Optional[int] = None,
+    dump_msg_id: Optional[int] = None,
 ) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
@@ -158,7 +163,7 @@ async def write_bot_log(level: str, message: str):
         await db.commit()
 
 
-async def get_recent_logs(limit: int = 50) -> list[dict]:
+async def get_recent_logs(limit: int = 50) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
