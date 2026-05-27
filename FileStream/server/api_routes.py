@@ -157,6 +157,12 @@ _class_cache = {}
 @routes.get("/stream/{token}", allow_head=True)
 async def stream_handler(request: web.Request):
     token = request.match_info["token"]
+
+    # Redirect browsers to the player page instead of raw bytes
+    accept = request.headers.get("Accept", "")
+    if "text/html" in accept and request.method == "GET":
+        raise web.HTTPFound(location=f"/player/{token}")
+
     try:
         ep = await site_db.get_episode_by_token(token)
         if not ep:
