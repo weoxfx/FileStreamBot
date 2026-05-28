@@ -9,12 +9,11 @@ async def _restart_bot(app: web.Application):
     from FileStream.bot import FileStream
     from FileStream.bot.clients import initialize_clients
 
-    try:
-        if FileStream.is_connected:
-            logger.info("Web startup: stopping bot client for restart...")
-            await FileStream.stop()
-    except Exception as e:
-        logger.warning("Web startup: error stopping bot client: %s", e)
+    # If already connected, skip — no need to restart
+    if getattr(FileStream, "is_connected", False):
+        logger.info("Web startup: bot is already connected as @%s. Skipping restart.",
+                    getattr(FileStream, "username", ""))
+        return
 
     try:
         logger.info("Web startup: starting bot client...")
@@ -23,16 +22,16 @@ async def _restart_bot(app: web.Application):
         FileStream.id = bot_info.id
         FileStream.username = bot_info.username
         FileStream.fname = bot_info.first_name
-        logger.info("Web startup: bot restarted as @%s", bot_info.username)
+        logger.info("Web startup: bot started as @%s", bot_info.username)
     except Exception as e:
-        logger.error("Web startup: failed to restart bot client: %s", e)
+        logger.error("Web startup: failed to start bot client: %s", e)
         return
 
     try:
         await initialize_clients()
-        logger.info("Web startup: multi-clients re-initialized.")
+        logger.info("Web startup: multi-clients initialized.")
     except Exception as e:
-        logger.error("Web startup: failed to re-initialize clients: %s", e)
+        logger.error("Web startup: failed to initialize clients: %s", e)
 
 
 def web_server():
