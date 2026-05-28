@@ -27,17 +27,28 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
         return False
 
     # ── Step 2: watermark with drawtext ─────────────────────────────────────
-    # Use simple hardcoded values — no expressions, no alpha syntax variants
+    # Prefer bundled Rajdhani Bold font; fall back to common system fonts
+    _font_candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "fonts", "watermark.ttf"),
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    ]
+    _font_path = next((p for p in _font_candidates if os.path.exists(p)), None)
+    _fontfile  = f"fontfile={_font_path}:" if _font_path else ""
+
     drawtext = (
         "drawtext="
         "text='Tsukuyomi':"
-        "fontsize=28:"
-        "fontcolor=white@0.35:"
-        "shadowcolor=black@0.25:"
+        f"{_fontfile}"
+        "fontsize=30:"
+        "fontcolor=white@0.40:"
+        "shadowcolor=black@0.50:"
         "shadowx=2:"
         "shadowy=2:"
-        "x=w-tw-24:"
-        "y=24"
+        "x=w-tw-20:"
+        "y=18"
     )
 
     wm_cmd = [

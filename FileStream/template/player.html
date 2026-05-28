@@ -155,11 +155,12 @@ video{position:absolute;inset:0;width:100%;height:100%;
 #seek:hover #seek-bg,#seek.active #seek-bg{height:6px}
 #seek-buf,#seek-fill{position:absolute;left:0;top:0;height:100%;border-radius:4px;pointer-events:none}
 #seek-buf{background:rgba(201,162,39,.22);width:0}
-#seek-fill{background:var(--gold);width:0;box-shadow:0 0 6px rgba(201,162,39,.35)}
+#seek-fill{background:var(--gold);width:0;box-shadow:0 0 6px rgba(201,162,39,.35);
+  will-change:width}
 #seek-thumb{position:absolute;top:50%;
   width:14px;height:14px;background:var(--gold2);border-radius:50%;
   transform:translate(-50%,-50%) scale(0);transition:transform .12s;pointer-events:none;
-  box-shadow:0 0 8px var(--gold)}
+  box-shadow:0 0 8px var(--gold);will-change:left}
 #seek:hover #seek-thumb,#seek.active #seek-thumb{transform:translate(-50%,-50%) scale(1)}
 
 /* Seek preview */
@@ -252,11 +253,21 @@ video{position:absolute;inset:0;width:100%;height:100%;
 .cc-back svg{width:14px;height:14px;fill:var(--gold)}
 
 /* Subtitles */
-#sub-box{position:absolute;bottom:90px;left:50%;transform:translateX(-50%);
-  text-align:center;pointer-events:none;z-index:28;max-width:92%}
-#sub-txt{display:inline;font-size:22px;color:#fff;
-  background:rgba(0,0,0,.76);padding:3px 8px;border-radius:4px;
-  line-height:1.55;white-space:pre-wrap;text-shadow:0 1px 3px #000}
+#sub-box{
+  position:absolute;bottom:96px;left:50%;transform:translateX(-50%);
+  text-align:center;pointer-events:none;z-index:28;max-width:88%;
+  transition:bottom .22s ease}
+/* Slide down when controls are hidden so subtitles use more screen */
+#W:not(.ui) #sub-box{bottom:20px}
+#sub-txt{
+  display:inline-block;max-width:100%;
+  font-size:22px;font-weight:500;color:#fff;
+  background:rgba(0,0,0,.82);
+  padding:5px 14px;border-radius:6px;
+  line-height:1.65;white-space:pre-wrap;
+  text-shadow:0 1px 4px rgba(0,0,0,.95),0 0 12px rgba(0,0,0,.6);
+  letter-spacing:.01em;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone}
 
 /* Mobile */
 @media(max-width:640px),(pointer:coarse){
@@ -268,8 +279,9 @@ video{position:absolute;inset:0;width:100%;height:100%;
   .cb svg{width:22px;height:22px}
   .cb::after{display:none}
   #vol-sl{width:56px}
-  #sub-box{bottom:76px}
-  #sub-txt{font-size:17px}
+  #sub-box{bottom:80px}
+  #W:not(.ui) #sub-box{bottom:14px}
+  #sub-txt{font-size:18px;padding:4px 10px}
   .panel{left:8px;right:8px;min-width:unset;bottom:72px}
   #sp-img{width:120px;height:68px}
 }
@@ -545,12 +557,30 @@ const Thumb = {
    VTT subtitle parser
 ═══════════════════════════════════════════════════════════ */
 function parseVTT(txt){
-  return txt.split(/\n\n+/).reduce((a,b)=>{
-    const lines=b.trim().split('\n'),i=lines.findIndex(l=>l.includes('-->'));
-    if(i<0)return a;
-    const toS=s=>{const p=s.trim().replace(',','.').split(':');return p.length===3?+p[0]*3600+(+p[1])*60+parseFloat(p[2]):(+p[0])*60+parseFloat(p[1]);};
-    const[start,end]=lines[i].split('-->').map(toS);
-    const text=lines.slice(i+1).join('\n').replace(/<[^>]+>/g,'').trim();
+  // Normalise line endings, strip UTF-8 BOM
+  txt=txt.replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/^\uFEFF/,'');
+  const toS=s=>{
+    // Accept HH:MM:SS.mmm or HH:MM:SS,mmm or MM:SS.mmm
+    const clean=s.trim().replace(',','.');
+    const p=clean.split(':');
+    return p.length===3?+p[0]*3600+(+p[1])*60+parseFloat(p[2]):(+p[0])*60+parseFloat(p[1]);
+  };
+  return txt.split(/\n{2,}/).reduce((a,block)=>{
+    const lines=block.trim().split('\n');
+    const ti=lines.findIndex(l=>l.includes('-->'));
+    if(ti<0)return a;
+    // Timing line may have cue settings after the end time — split on first space after end
+    const tparts=lines[ti].split('-->');
+    const start=toS(tparts[0]);
+    const end=toS(tparts[1]?.split(/\s/)[0]||'');
+    if(isNaN(start)||isNaN(end))return a;
+    const raw=lines.slice(ti+1).join('\n');
+    const text=raw
+      .replace(/<[^>]+>/g,'')      // strip VTT tags (<i>, <b>, <c.color>, etc.)
+      .replace(/\{[^}]+\}/g,'')    // strip SSA/ASS override tags
+      .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+      .replace(/&nbsp;/g,' ').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(n))
+      .trim();
     if(text)a.push({start,end,text});
     return a;
   },[]);
@@ -561,39 +591,72 @@ function parseVTT(txt){
 ═══════════════════════════════════════════════════════════ */
 const CCM = {
   tracks:[],idx:-1,
+  _lastText:null,_lastStyle:'',
   cfg:{size:22,color:'#ffffff',bgOp:75,font:"'Segoe UI',sans-serif",pos:'bottom'},
+
   add(label,lang,url){
     const i=this.tracks.length;
-    this.tracks.push({label,lang,url,cues:[]});
-    fetch(url).then(r=>r.text()).then(t=>{this.tracks[i].cues=parseVTT(t);});
+    this.tracks.push({label,lang,url,cues:[],loaded:false});
+    fetch(url)
+      .then(r=>{if(!r.ok)throw new Error(r.status);return r.text();})
+      .then(t=>{
+        this.tracks[i].cues=parseVTT(t);
+        this.tracks[i].loaded=true;
+        // Auto-activate first track once loaded if CC is on and nothing active yet
+        if(i===0&&this.idx<0&&P&&P.ccOn)this.setActive(0);
+      })
+      .catch(()=>{});
     const sel=$('cc-track'),o=document.createElement('option');
     o.value=i;o.textContent=`${label} (${lang})`;sel.appendChild(o);
+    // If this is the first track and CC is already on, select it in the dropdown
+    if(i===0&&P&&P.ccOn&&this.idx<0){sel.value='0';}
     emit('cctrack',{index:i,label,lang});
     return i;
   },
+
   setActive(i){
-    this.idx=parseInt(i);$('cc-track').value=i;
+    this.idx=parseInt(i);
+    $('cc-track').value=i;
+    this._lastText=null; // force re-render
     emit('ccchange',{index:i});
   },
+
   render(t){
     const span=$('sub-txt');
-    if(this.idx<0||!P.ccOn){span.textContent='';return;}
+    if(this.idx<0||!P.ccOn){
+      if(this._lastText!==null){span.textContent='';this._lastText=null;}
+      return;
+    }
     const trk=this.tracks[this.idx];
-    if(!trk){span.textContent='';return;}
+    if(!trk){if(this._lastText!==null){span.textContent='';this._lastText=null;}return;}
     const cue=trk.cues.find(c=>t>=c.start&&t<=c.end);
-    span.textContent=cue?cue.text:'';
+    const newText=cue?cue.text:'';
+    // Only touch the DOM when something actually changed
+    if(newText!==this._lastText){
+      this._lastText=newText;
+      // Use innerHTML so \n becomes <br> for multi-line cues
+      span.innerHTML=newText.replace(/\n/g,'<br>');
+    }
+    // Re-apply style only when settings changed (sync() sets _lastStyle='')
     const s=this.cfg;
-    span.style.cssText=`font-size:${s.size}px;color:${s.color};font-family:${s.font};background:rgba(0,0,0,${(s.bgOp/100).toFixed(2)})`;
-    $('sub-box').style.cssText=s.pos==='top'
-      ?'bottom:auto;top:54px;left:50%;transform:translateX(-50%)'
-      :'top:auto;bottom:90px;left:50%;transform:translateX(-50%)';
+    const styleStr=`font-size:${s.size}px;color:${s.color};font-family:${s.font};background:rgba(0,0,0,${(s.bgOp/100).toFixed(2)})`;
+    if(styleStr!==this._lastStyle){
+      this._lastStyle=styleStr;
+      span.style.cssText=styleStr;
+      const box=$('sub-box');
+      box.style.cssText=s.pos==='top'
+        ?'bottom:auto;top:54px;left:50%;transform:translateX(-50%)'
+        :'top:auto;bottom:90px;left:50%;transform:translateX(-50%)';
+    }
   },
+
   sync(){
     this.cfg.size  = +$('cc-sz').value;
     this.cfg.color = $('cc-col').value;
     this.cfg.bgOp  = +$('cc-bgop').value;
     this.cfg.font  = $('cc-font').value;
     this.cfg.pos   = $('cc-pos').value;
+    this._lastStyle=''; // force style re-apply on next render
     emit('ccsettings',{cfg:this.cfg});
   }
 };
@@ -701,6 +764,12 @@ class Player {
     // Toggles
     if(p.autoskip!=null)this.setAutoskip(p.autoskip);
     if(p.autoplay!=null)this.setAutoplay(p.autoplay);
+    // Playback speed
+    if(p.speed!=null&&p.speed>0){
+      this.V.playbackRate=p.speed;
+      const sel=$('sel-spd');
+      if(sel)sel.value=String(p.speed);
+    }
     // Last-used quality index for this anime (if still valid)
     if(p.qIdx!=null&&p.qIdx>0&&p.qIdx<this.qualities.length){
       this.qIdx=p.qIdx;
@@ -846,7 +915,15 @@ class Player {
 
     V.addEventListener('progress',()=>{
       if(!V.buffered.length||!V.duration)return;
-      $('seek-buf').style.width=(V.buffered.end(V.buffered.length-1)/V.duration*100)+'%';
+      // Find the buffered range that contains the current time (most relevant)
+      let best=0;
+      for(let i=0;i<V.buffered.length;i++){
+        if(V.currentTime>=V.buffered.start(i)&&V.currentTime<=V.buffered.end(i)){
+          best=V.buffered.end(i);break;
+        }
+        if(V.buffered.end(i)>best)best=V.buffered.end(i);
+      }
+      $('seek-buf').style.width=(best/V.duration*100)+'%';
     });
 
     V.addEventListener('durationchange',()=>{$('td').textContent=fmt(V.duration);});
@@ -1048,6 +1125,8 @@ class Player {
       hideT=setTimeout(()=>{if(!V.paused)W.classList.remove('ui');},3000);
     };
     W.addEventListener('mousemove',showUI);
+    // Show controls immediately on load so user sees them before first interaction
+    showUI();
 
     W.addEventListener('click',e=>{
       if(e.target.closest('#ctrl,#skip,.panel,#q-dd,#nxt,#mute-bar'))return;
@@ -1092,8 +1171,10 @@ class Player {
     $('btn-cc').onclick=e=>{
       e.stopPropagation();
       this.ccOn=!this.ccOn;
+      // Auto-select first available track when CC is turned on
+      if(this.ccOn&&CCM.idx<0&&CCM.tracks.length>0)CCM.setActive(0);
       $('btn-cc').classList.toggle('on',this.ccOn);
-      if(!this.ccOn)$('sub-txt').textContent='';
+      if(!this.ccOn){$('sub-txt').innerHTML='';CCM._lastText=null;}
       emit('ccvisibility',{visible:this.ccOn});
     };
 
@@ -1132,7 +1213,13 @@ class Player {
     $('tog-skip').onclick=e=>{e.stopPropagation();this.setAutoskip(!this.autoskip);};
     $('tog-ap').onclick=e=>{e.stopPropagation();this.setAutoplay(!this.autoplay);};
     $('inp-pad').onchange=e=>{this.skipPad=parseFloat(e.target.value)||0;};
-    $('sel-spd').onchange=e=>{V.playbackRate=+e.target.value;emit('speedchange',{speed:V.playbackRate});};
+    $('sel-spd').onchange=e=>{
+      V.playbackRate=+e.target.value;
+      const spd=V.playbackRate;
+      toast(spd===1?'Speed: Normal':`Speed: ${spd}×`);
+      Cache.savePrefs({speed:spd});
+      emit('speedchange',{speed:spd});
+    };
 
     $('btn-fs').onclick=e=>{e.stopPropagation();this._toggleFS();};
     document.addEventListener('fullscreenchange',()=>{
