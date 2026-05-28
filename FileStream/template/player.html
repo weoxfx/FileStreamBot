@@ -572,7 +572,7 @@ function parseVTT(txt){
     // Timing line may have cue settings after the end time — split on first space after end
     const tparts=lines[ti].split('-->');
     const start=toS(tparts[0]);
-    const end=toS(tparts[1]?.split(/\s/)[0]||'');
+    const end=toS(tparts[1]?.trim().split(/\s/)[0]||'');
     if(isNaN(start)||isNaN(end))return a;
     const raw=lines.slice(ti+1).join('\n');
     const text=raw
