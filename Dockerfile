@@ -14,4 +14,6 @@ COPY . .
 
 RUN mkdir -p data logs
 
-CMD ["python", "-m", "FileStream"]
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-u", "-m", "FileStream"]
