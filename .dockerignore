@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+*.pyc
+__pycache__
+*.session
+*.session-journal
+data/
+logs/
+.replit
+replit.nix
+.local/
