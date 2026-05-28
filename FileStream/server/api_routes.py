@@ -116,6 +116,14 @@ async def player_handler(request: web.Request):
     except Exception:
         pass
 
+    raw_subs = await site_db.get_subtitles_for_episode(
+        ep["anime_slug"], ep["season"], ep["episode"]
+    )
+    subtitles = [
+        {"id": s["id"], "label": s["label"], "lang": s["lang"], "url": "/subtitle/" + str(s["id"])}
+        for s in raw_subs
+    ]
+
     episode_data = {
         "anime_name":     ep["anime_name"],
         "slug":           ep["anime_slug"],
@@ -126,6 +134,7 @@ async def player_handler(request: web.Request):
         "next_token":     next_token,
         "poster_url":     "/poster/" + token,
         "thumbnails_url": None,
+        "subtitles":      subtitles,
     }
 
     try:
@@ -216,6 +225,87 @@ async def poster_handler(request: web.Request):
     except Exception as e:
         logger.warning("Poster fetch failed for %s: %s", token, e)
         raise web.HTTPNotFound()
+
+
+@routes.get("/subtitle/{sub_id}", allow_head=True)
+async def subtitle_handler(request: web.Request):
+    """
+    Stream a subtitle file (VTT/SRT) stored in Telegram by its DB id.
+    Cached in memory for 24 hours.
+    """
+    try:
+        sub_id = int(request.match_info["sub_id"])
+    except ValueError:
+        raise web.HTTPNotFound()
+
+    cache_key = f"sub_{sub_id}"
+    cached = _poster_cache.get(cache_key)
+    if cached:
+        data_bytes, ts = cached
+        if time.time() - ts < _POSTER_CACHE_TTL:
+            content_type = "text/vtt; charset=utf-8"
+            return web.Response(
+                body=data_bytes,
+                content_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "Access-Control-Allow-Origin": "*",
+                },
+            )
+        else:
+            del _poster_cache[cache_key]
+
+    sub = await site_db.get_subtitle_by_id(sub_id)
+    if not sub:
+        raise web.HTTPNotFound()
+
+    try:
+        _, client = _pick_client()
+        bio = await client.download_media(sub["file_id"], in_memory=True)
+        if not bio:
+            raise web.HTTPNotFound()
+
+        if hasattr(bio, "getvalue"):
+            data_bytes = bio.getvalue()
+        elif hasattr(bio, "read"):
+            bio.seek(0)
+            data_bytes = bio.read()
+        else:
+            data_bytes = bytes(bio)
+
+        if not data_bytes:
+            raise web.HTTPNotFound()
+
+        # Convert SRT to VTT on the fly if needed
+        text = data_bytes.decode("utf-8", errors="replace")
+        if not text.strip().startswith("WEBVTT"):
+            text = _srt_to_vtt(text)
+            data_bytes = text.encode("utf-8")
+
+        _poster_cache[cache_key] = (data_bytes, time.time())
+
+        return web.Response(
+            body=data_bytes,
+            content_type="text/vtt; charset=utf-8",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+    except web.HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Subtitle fetch failed for id=%s: %s", sub_id, e)
+        raise web.HTTPNotFound()
+
+
+def _srt_to_vtt(srt_text: str) -> str:
+    """Convert SRT subtitle format to WebVTT."""
+    text = srt_text.replace("\r\n", "\n").replace("\r", "\n")
+    # Replace SRT timestamp commas with dots (00:00:00,000 -> 00:00:00.000)
+    import re
+    text = re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", text)
+    return "WEBVTT\n\n" + text.strip() + "\n"
 
 
 @routes.get("/api/aniskip", allow_head=True)

@@ -752,6 +752,12 @@ class Player {
     if(MAL_ID)this._fetchSkip();
     if(ED.thumbnails_url)Thumb.load(ED.thumbnails_url);
     if(ED.poster_url)Poster.init(ED.poster_url);
+    if(Array.isArray(ED.subtitles)&&ED.subtitles.length>0){
+      ED.subtitles.forEach(s=>CCM.add(s.label,s.lang,s.url));
+      // Auto-enable CC when subtitles are present
+      this.ccOn=true;
+      $('btn-cc').classList.add('on');
+    }
 
     emit('ready',{episode:ED,qualities:this.qualities});
   }

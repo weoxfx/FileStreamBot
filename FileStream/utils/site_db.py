@@ -42,10 +42,24 @@ async def init_site_db():
                 UNIQUE(anime_id, season, episode, audio_type, quality)
             );
 
+            CREATE TABLE IF NOT EXISTS subtitles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                anime_id INTEGER NOT NULL REFERENCES anime(id),
+                season INTEGER NOT NULL,
+                episode INTEGER NOT NULL,
+                label TEXT NOT NULL DEFAULT 'Subtitle',
+                lang TEXT NOT NULL DEFAULT 'en',
+                file_id TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                UNIQUE(anime_id, season, episode, lang)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_episodes_anime
                 ON episodes(anime_id, season, episode);
             CREATE INDEX IF NOT EXISTS idx_episodes_token
                 ON episodes(stream_token);
+            CREATE INDEX IF NOT EXISTS idx_subtitles_episode
+                ON subtitles(anime_id, season, episode);
         """)
         await db.commit()
     logger.info("Site DB initialized at %s", DB_PATH)
@@ -218,6 +232,71 @@ async def delete_episode_by_dump_msg(dump_msg_id: int, dump_channel_id: int) -> 
 
         await db.commit()
         logger.info("Deleted episode for dump_msg_id=%s from channel=%s", dump_msg_id, dump_channel_id)
+        return True
+
+
+async def upsert_subtitle(anime_id, season, episode, label, lang, file_id):
+    """Insert or replace a subtitle track for an episode. Returns the subtitle row id."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT id FROM subtitles
+               WHERE anime_id = ? AND season = ? AND episode = ? AND lang = ?""",
+            (anime_id, season, episode, lang)
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            await db.execute(
+                """UPDATE subtitles SET label=?, file_id=?, created_at=?
+                   WHERE anime_id=? AND season=? AND episode=? AND lang=?""",
+                (label, file_id, time.time(), anime_id, season, episode, lang)
+            )
+            sub_id = row[0]
+        else:
+            cur = await db.execute(
+                """INSERT INTO subtitles (anime_id, season, episode, label, lang, file_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (anime_id, season, episode, label, lang, file_id, time.time())
+            )
+            sub_id = cur.lastrowid
+        await db.commit()
+        return sub_id
+
+
+async def get_subtitles_for_episode(slug, season, episode):
+    """Return all subtitle tracks for a given episode."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT s.id, s.label, s.lang, s.file_id
+               FROM subtitles s JOIN anime a ON s.anime_id = a.id
+               WHERE a.slug = ? AND s.season = ? AND s.episode = ?
+               ORDER BY s.lang""",
+            (slug, season, episode)
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def get_subtitle_by_id(sub_id):
+    """Return a single subtitle row by its id."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM subtitles WHERE id = ?", (sub_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def delete_subtitle_by_id(sub_id):
+    """Delete a subtitle track by id. Returns True if deleted."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT id FROM subtitles WHERE id = ?", (sub_id,)) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return False
+        await db.execute("DELETE FROM subtitles WHERE id = ?", (sub_id,))
+        await db.commit()
         return True
 
 
