@@ -69,12 +69,19 @@ async def init_site_db():
 
     # Migration: add anilist_id column to anime table if it doesn't exist yet
     async with aiosqlite.connect(DB_PATH) as db:
-        try:
-            await db.execute("ALTER TABLE anime ADD COLUMN anilist_id INTEGER")
-            await db.commit()
-            logger.info("Migrated anime table: added anilist_id column")
-        except Exception:
-            pass  # Column already exists
+        for col, typedef in [
+            ("anilist_id",     "INTEGER"),
+            ("mal_id",         "INTEGER"),
+            ("cover_url",      "TEXT DEFAULT ''"),
+            ("synopsis",       "TEXT DEFAULT ''"),
+            ("total_episodes", "INTEGER"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE anime ADD COLUMN {col} {typedef}")
+                await db.commit()
+                logger.info("Migrated anime table: added column %s", col)
+            except Exception:
+                pass  # Column already exists
 
     logger.info("Site DB initialized at %s", DB_PATH)
 
@@ -92,37 +99,44 @@ def _make_token(anilist_id, episode, audio_type, quality):
 
 # ── Anime ────────────────────────────────────────────────────────────────────
 
-async def get_or_create_anime(name: str, slug: str, anilist_id: Optional[int] = None) -> int:
-    """Return internal anime.id, creating the row if needed."""
+async def get_or_create_anime(
+    name: str,
+    slug: str,
+    anilist_id: Optional[int] = None,
+    mal_id: Optional[int] = None,
+    cover_url: str = "",
+    synopsis: str = "",
+    total_episodes: Optional[int] = None,
+) -> int:
+    """Return internal anime.id, creating/updating the row as needed."""
     async with aiosqlite.connect(DB_PATH) as db:
-        # Try to find by anilist_id first (most reliable)
         if anilist_id:
             async with db.execute("SELECT id FROM anime WHERE anilist_id = ?", (anilist_id,)) as cur:
                 row = await cur.fetchone()
             if row:
-                # Update name/slug in case they changed
                 await db.execute(
-                    "UPDATE anime SET name=?, slug=? WHERE anilist_id=?",
-                    (name, slug, anilist_id)
+                    """UPDATE anime SET name=?, slug=?, mal_id=?, cover_url=?,
+                       synopsis=?, total_episodes=? WHERE anilist_id=?""",
+                    (name, slug, mal_id, cover_url, synopsis, total_episodes, anilist_id)
                 )
                 await db.commit()
                 return row[0]
 
-        # Fall back to slug lookup
         async with db.execute("SELECT id FROM anime WHERE slug = ?", (slug,)) as cur:
             row = await cur.fetchone()
         if row:
-            if anilist_id:
-                await db.execute(
-                    "UPDATE anime SET anilist_id=?, name=? WHERE slug=?",
-                    (anilist_id, name, slug)
-                )
-                await db.commit()
+            await db.execute(
+                """UPDATE anime SET anilist_id=?, name=?, mal_id=?, cover_url=?,
+                   synopsis=?, total_episodes=? WHERE slug=?""",
+                (anilist_id, name, mal_id, cover_url, synopsis, total_episodes, slug)
+            )
+            await db.commit()
             return row[0]
 
         cur = await db.execute(
-            "INSERT INTO anime (anilist_id, name, slug, created_at) VALUES (?, ?, ?, ?)",
-            (anilist_id, name, slug, time.time())
+            """INSERT INTO anime (anilist_id, name, slug, mal_id, cover_url,
+               synopsis, total_episodes, created_at) VALUES (?,?,?,?,?,?,?,?)""",
+            (anilist_id, name, slug, mal_id, cover_url, synopsis, total_episodes, time.time())
         )
         await db.commit()
         return cur.lastrowid

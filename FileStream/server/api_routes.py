@@ -88,14 +88,19 @@ async def status_handler(_):
 @routes.get("/player/{token}", allow_head=True)
 async def player_handler(request: web.Request):
     """Serve the full-featured Tsukuyomi video player."""
-    token  = request.match_info["token"]
-    mal_id = request.rel_url.query.get("mal_id", "null")
+    token = request.match_info["token"]
 
     ep = await site_db.get_episode_by_token(token)
     if not ep:
         raise web.HTTPNotFound(text="Stream token not found")
 
     anilist_id = ep.get("anilist_id")
+
+    # Fetch anime metadata for mal_id / cover_url
+    anime_meta = None
+    if anilist_id:
+        anime_meta = await site_db.get_anime_by_anilist_id(anilist_id)
+
     if anilist_id:
         qualities = await site_db.get_episode_qualities(anilist_id, ep["episode"])
     else:
@@ -133,9 +138,28 @@ async def player_handler(request: web.Request):
         for s in raw_subs
     ]
 
+    # Pull AniList-sourced fields (prefer DB, fall back to None)
+    cover_url  = (anime_meta or {}).get("cover_url") or None
+    mal_id_db  = (anime_meta or {}).get("mal_id")
+    synopsis   = (anime_meta or {}).get("synopsis") or ""
+
+    # Allow manual ?mal_id= override for legacy links
+    mal_id_url = request.rel_url.query.get("mal_id")
+    mal_id_val = None
+    for candidate in (mal_id_url, mal_id_db):
+        try:
+            mal_id_val = int(candidate)
+            break
+        except (TypeError, ValueError):
+            pass
+
     episode_data = {
         "anime_name":     ep["anime_name"],
         "slug":           ep["anime_slug"],
+        "anilist_id":     anilist_id,
+        "mal_id":         mal_id_val,
+        "cover_url":      cover_url,
+        "synopsis":       synopsis,
         "season":         ep["season"],
         "episode":        ep["episode"],
         "audio_type":     ep["audio_type"],
@@ -146,19 +170,12 @@ async def player_handler(request: web.Request):
         "subtitles":      subtitles,
     }
 
-    try:
-        mal_id_val = int(mal_id)
-    except (ValueError, TypeError):
-        mal_id_val = "null"
-
     tmpl = _jinja.get_template("player.html")
     html = tmpl.render(
         anime_name   = ep["anime_name"],
-        season       = ep["season"],
         episode      = ep["episode"],
         audio_type   = ep["audio_type"],
         episode_json = json.dumps(episode_data),
-        mal_id       = mal_id_val,
     )
     return web.Response(text=html, content_type="text/html")
 

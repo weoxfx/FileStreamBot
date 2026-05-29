@@ -1,7 +1,7 @@
 """
 AniList GraphQL API helpers.
-- fetch_anime_by_id(id)   → {anilist_id, name, slug} or None
-- search_anime_by_name(s) → {anilist_id, name, slug} or None
+- fetch_anime_by_id(id)   → full metadata dict or None
+- search_anime_by_name(s) → full metadata dict or None
 """
 import re
 import logging
@@ -12,11 +12,23 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 _URL = "https://graphql.anilist.co"
 
+_FIELDS = """
+    id
+    malId
+    title { romaji english }
+    coverImage { extraLarge large }
+    bannerImage
+    description(asHtml: false)
+    episodes
+    averageScore
+    genres
+    status
+"""
+
 _BY_ID = """
 query ($id: Int) {
   Media(id: $id, type: ANIME) {
-    id
-    title { romaji english }
+""" + _FIELDS + """
   }
 }
 """
@@ -24,8 +36,7 @@ query ($id: Int) {
 _BY_SEARCH = """
 query ($search: String) {
   Media(search: $search, type: ANIME) {
-    id
-    title { romaji english }
+""" + _FIELDS + """
   }
 }
 """
@@ -40,6 +51,27 @@ def make_slug(name: str) -> str:
     name = re.sub(r"[^a-z0-9\s\-]", "", name)
     name = re.sub(r"\s+", "-", name)
     return name.strip("-")
+
+
+def _parse_media(media: dict) -> dict:
+    title     = _best_title(media["title"])
+    cover_img = media.get("coverImage") or {}
+    cover_url = cover_img.get("extraLarge") or cover_img.get("large") or ""
+    # Strip HTML from description if any leaked through
+    synopsis  = re.sub(r"<[^>]+>", "", media.get("description") or "").strip()
+    return {
+        "anilist_id":     media["id"],
+        "mal_id":         media.get("malId"),
+        "name":           title,
+        "slug":           make_slug(title),
+        "cover_url":      cover_url,
+        "banner_url":     media.get("bannerImage") or "",
+        "synopsis":       synopsis[:1000],   # cap at 1000 chars
+        "total_episodes": media.get("episodes"),
+        "score":          media.get("averageScore"),
+        "genres":         media.get("genres") or [],
+        "status":         media.get("status") or "",
+    }
 
 
 async def _query(payload: dict) -> Optional[dict]:
@@ -58,7 +90,7 @@ async def _query(payload: dict) -> Optional[dict]:
 
 
 async def fetch_anime_by_id(anilist_id: int) -> Optional[dict]:
-    """Return {anilist_id, name, slug} for a given AniList media ID, or None."""
+    """Return full metadata dict for a given AniList media ID, or None."""
     data = await _query({"query": _BY_ID, "variables": {"id": anilist_id}})
     if not data:
         return None
@@ -66,8 +98,7 @@ async def fetch_anime_by_id(anilist_id: int) -> Optional[dict]:
     if not media:
         logger.warning("AniList id %s not found", anilist_id)
         return None
-    title = _best_title(media["title"])
-    return {"anilist_id": media["id"], "name": title, "slug": make_slug(title)}
+    return _parse_media(media)
 
 
 async def search_anime_by_name(name: str) -> Optional[dict]:
@@ -79,5 +110,4 @@ async def search_anime_by_name(name: str) -> Optional[dict]:
     if not media:
         logger.warning("AniList search '%s' returned nothing", name)
         return None
-    title = _best_title(media["title"])
-    return {"anilist_id": media["id"], "name": title, "slug": make_slug(title)}
+    return _parse_media(media)

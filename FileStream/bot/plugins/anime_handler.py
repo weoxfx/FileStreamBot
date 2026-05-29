@@ -4,8 +4,11 @@ uploads to dump channel, stores in site DB, shows live progress.
 
 Modes (set with /mode):
   anilist_id  — caption: "AniList ID | Episode | sub/dub/hsub | quality"
-  auto_sub    — filename: "Show Name - Episode - Quality.ext"  (audio=sub)
-  auto_dub    — filename: "Show Name - Episode - Quality.ext"  (audio=dub)
+  auto_sub    — caption first (AniList ID format), then filename fallback (audio=sub)
+  auto_dub    — caption first (AniList ID format), then filename fallback (audio=dub)
+
+In auto_sub/auto_dub: if caption parses as valid AniList ID format, caption wins
+(its explicit audio type overrides the mode). Otherwise filename is parsed.
 """
 import os
 import asyncio
@@ -31,8 +34,7 @@ logger = logging.getLogger(__name__)
 
 BAR_LEN = 16
 
-# Active upload tasks: message_id → asyncio.Task
-# Used by /stop to cancel in-flight uploads.
+# Active upload tasks: message_id → asyncio.Task  (used by /stop)
 _active_tasks: Dict[int, asyncio.Task] = {}
 
 
@@ -75,11 +77,7 @@ async def anime_file_handler(bot: Client, message: Message):
 
     task = asyncio.ensure_future(_process_upload(bot, message))
     _active_tasks[message.id] = task
-
-    def _done(t):
-        _active_tasks.pop(message.id, None)
-
-    task.add_done_callback(_done)
+    task.add_done_callback(lambda t: _active_tasks.pop(message.id, None))
 
 
 async def _process_upload(bot: Client, message: Message):
@@ -104,7 +102,7 @@ async def _handle_anilist_mode(bot: Client, message: Message):
             "❌ <b>Missing caption.</b>\n\n"
             "<b>Format:</b>\n<code>AniList ID | Episode | sub/dub/hsub | quality</code>\n\n"
             "<b>Example:</b>\n<code>21355 | 1 | sub | 720p</code>\n\n"
-            "Use /mode to switch to filename-based auto mode.",
+            "Use /mode to switch to filename auto mode.",
             parse_mode=ParseMode.HTML, quote=True
         )
         return
@@ -132,9 +130,7 @@ async def _handle_anilist_mode(bot: Client, message: Message):
         return
 
     await _do_upload(
-        bot=bot,
-        message=message,
-        status_msg=status_msg,
+        bot=bot, message=message, status_msg=status_msg,
         anime_info=anime_info,
         episode=parsed["episode"],
         audio_type=parsed["audio_type"],
@@ -142,24 +138,55 @@ async def _handle_anilist_mode(bot: Client, message: Message):
     )
 
 
-# ── Auto mode (filename parsing) ─────────────────────────────────────────────
+# ── Auto mode (caption first, then filename) ─────────────────────────────────
 
-async def _handle_auto_mode(bot: Client, message: Message, audio_type: str):
-    filename = _get_field(message, "file_name") or ""
-    if not filename:
-        if message.video:
-            filename = f"video_{message.id}.mp4"
-        else:
-            await message.reply_text(
-                "❌ <b>Could not read filename.</b>\nSend the file as a document, not a compressed video.",
+async def _handle_auto_mode(bot: Client, message: Message, default_audio: str):
+    """
+    1. Try to parse caption as "AniList ID | ep | type | quality" — use if valid.
+    2. Fall back to filename template "Show Name - ep - quality.ext".
+    """
+    # ── Step 1: caption ──────────────────────────────────────────────────────
+    caption_raw = (message.caption or "").strip()
+    if caption_raw and "|" in caption_raw:
+        parsed = parse_caption(caption_raw)
+        if parsed:
+            status_msg = await message.reply_text(
+                "🔍 <b>Looking up AniList ID from caption…</b>",
                 parse_mode=ParseMode.HTML, quote=True
             )
-            return
+            anime_info = await fetch_anime_by_id(parsed["anilist_id"])
+            if anime_info:
+                await _do_upload(
+                    bot=bot, message=message, status_msg=status_msg,
+                    anime_info=anime_info,
+                    episode=parsed["episode"],
+                    audio_type=parsed["audio_type"],   # caption's explicit type wins
+                    quality=parsed["quality"],
+                )
+                return
+            # ID in caption but not found on AniList — warn and fall through
+            await status_msg.edit_text(
+                f"⚠️ AniList ID <code>{parsed['anilist_id']}</code> not found.\n"
+                "Trying filename…",
+                parse_mode=ParseMode.HTML
+            )
 
-    parsed = parse_filename(filename)
-    if not parsed:
+    # ── Step 2: filename ─────────────────────────────────────────────────────
+    filename = _get_field(message, "file_name") or ""
+    if not filename:
         await message.reply_text(
-            "❌ <b>Filename does not match the expected pattern.</b>\n\n"
+            "❌ <b>No caption and no readable filename.</b>\n\n"
+            "Either add a caption <code>AniList ID | ep | sub | quality</code>\n"
+            "or send the file with a name like:\n"
+            "<code>Show Name - 1 - 720p.mkv</code>",
+            parse_mode=ParseMode.HTML, quote=True
+        )
+        return
+
+    fn_parsed = parse_filename(filename)
+    if not fn_parsed:
+        await message.reply_text(
+            "❌ <b>Filename does not match expected pattern.</b>\n\n"
             "<b>Expected:</b> <code>Show Name - Episode - Quality.ext</code>\n"
             "<b>Example:</b> <code>ReZERO -Starting Life in Another World- - 1 - 360p.mkv</code>",
             parse_mode=ParseMode.HTML, quote=True
@@ -167,33 +194,31 @@ async def _handle_auto_mode(bot: Client, message: Message, audio_type: str):
         return
 
     status_msg = await message.reply_text(
-        f"🔍 <b>Searching AniList for:</b> <code>{parsed['anime_name']}</code>",
+        f"🔍 <b>Searching AniList for:</b> <code>{fn_parsed['anime_name']}</code>",
         parse_mode=ParseMode.HTML, quote=True
     )
 
-    anime_info = await search_anime_by_name(parsed["anime_name"])
+    anime_info = await search_anime_by_name(fn_parsed["anime_name"])
     if not anime_info:
         await status_msg.edit_text(
-            f"❌ <b>Could not find anime on AniList:</b> <code>{parsed['anime_name']}</code>\n\n"
-            "Try renaming the file or use AniList ID mode.",
+            f"❌ <b>Could not find on AniList:</b> <code>{fn_parsed['anime_name']}</code>\n\n"
+            "Try renaming the file or use AniList ID mode (/mode).",
             parse_mode=ParseMode.HTML
         )
         return
 
     await status_msg.edit_text(
         f"✅ <b>Found:</b> {anime_info['name']} <code>(ID: {anime_info['anilist_id']})</code>\n"
-        f"📦 <b>Processing episode {parsed['episode']}…</b>",
+        f"📦 <b>Processing episode {fn_parsed['episode']}…</b>",
         parse_mode=ParseMode.HTML
     )
 
     await _do_upload(
-        bot=bot,
-        message=message,
-        status_msg=status_msg,
+        bot=bot, message=message, status_msg=status_msg,
         anime_info=anime_info,
-        episode=parsed["episode"],
-        audio_type=audio_type,
-        quality=parsed["quality"],
+        episode=fn_parsed["episode"],
+        audio_type=default_audio,
+        quality=fn_parsed["quality"],
     )
 
 
@@ -208,9 +233,13 @@ async def _do_upload(
     audio_type: str,
     quality: str,
 ):
-    anilist_id = anime_info["anilist_id"]
-    anime_name = anime_info["name"]
-    slug       = anime_info["slug"]
+    anilist_id     = anime_info["anilist_id"]
+    anime_name     = anime_info["name"]
+    slug           = anime_info["slug"]
+    mal_id         = anime_info.get("mal_id")
+    cover_url      = anime_info.get("cover_url") or ""
+    synopsis       = anime_info.get("synopsis") or ""
+    total_episodes = anime_info.get("total_episodes")
 
     file_id        = _get_field(message, "file_id")
     file_unique_id = _get_field(message, "file_unique_id")
@@ -346,9 +375,7 @@ async def _do_upload(
 
     if not dump_msg_id:
         try:
-            await status_msg.edit_text(
-                "❌ <b>Upload failed.</b>", parse_mode=ParseMode.HTML
-            )
+            await status_msg.edit_text("❌ <b>Upload failed.</b>", parse_mode=ParseMode.HTML)
         except Exception:
             pass
         return
@@ -370,7 +397,13 @@ async def _do_upload(
         )
     )
 
-    anime_id     = await site_db.get_or_create_anime(anime_name, slug, anilist_id)
+    anime_id = await site_db.get_or_create_anime(
+        anime_name, slug, anilist_id,
+        mal_id=mal_id,
+        cover_url=cover_url,
+        synopsis=synopsis,
+        total_episodes=total_episodes,
+    )
     stream_token = await site_db.upsert_episode(
         anime_id=anime_id,
         episode=episode,
@@ -388,13 +421,14 @@ async def _do_upload(
 
     if Telegram.ULOG_CHANNEL:
         try:
+            score_txt = f" • ⭐ {anime_info.get('score')}" if anime_info.get("score") else ""
             await bot.send_message(
                 Telegram.ULOG_CHANNEL,
                 "✅ <b>#NewEpisode</b>\n"
-                "<b>Anime:</b> {} <code>({})</code>\n"
+                "<b>Anime:</b> {} <code>({})</code>{}\n"
                 "<b>Episode:</b> {} | <b>Type:</b> {} | <b>Quality:</b> {}\n"
                 "<b>Token:</b> <code>{}</code>".format(
-                    anime_name, anilist_id, episode,
+                    anime_name, anilist_id, score_txt, episode,
                     audio_type.upper(), quality, stream_token
                 ),
                 parse_mode=ParseMode.HTML,
@@ -402,14 +436,17 @@ async def _do_upload(
         except Exception:
             pass
 
+    genres_txt = ", ".join(anime_info.get("genres", [])[:3])
     await status_msg.edit_text(
         "✅ <b>Done!</b>\n\n"
         "<b>Anime:</b> {} <code>({})</code>\n"
+        "{}"
         "<b>Episode:</b> {} | <b>Type:</b> {} | <b>Quality:</b> {}\n\n"
         "<b>Token:</b>\n<code>{}</code>\n\n"
         "<b>Player:</b>\n<code>{}</code>".format(
-            anime_name, anilist_id, episode,
-            audio_type.upper(), quality,
+            anime_name, anilist_id,
+            f"<b>Genres:</b> {genres_txt}\n" if genres_txt else "",
+            episode, audio_type.upper(), quality,
             stream_token, player_url
         ),
         parse_mode=ParseMode.HTML,
