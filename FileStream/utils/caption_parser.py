@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 AUDIO_TYPES = {"sub", "dub", "hsub", "multi", "raw"}
 
 # Quality tokens we recognise (case-insensitive).
-# Covers: 360p, 480p, 720p, 1080p, 2160p/4K, BD, WEB, WEBRip, HEVC, etc.
 _QUALITY_RE = re.compile(
     r"^(\d{3,4}p|4k|2160p|1080p|720p|480p|360p|240p|bd|web|webrip|hevc|uhd)$",
     re.IGNORECASE,
@@ -27,19 +26,6 @@ _VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".flv"}
 # ---------------------------------------------------------------------------
 
 def parse_caption(caption: str) -> Optional[dict]:
-    """
-    Parse AniList ID mode caption:
-        AniList ID | Episode | sub/dub/hsub/multi/raw | quality
-
-    - Strips whitespace around each field.
-    - Accepts quality strings like 720p, 1080p, 4K, BD, WEB, HEVC …
-    - Validates audio_type against AUDIO_TYPES; logs a warning but still
-      returns the value so the caller can decide — change `warn_only` to
-      False below to make it a hard failure instead.
-    - Always returns quality in lowercase.
-
-    Returns dict or None.
-    """
     if not caption:
         return None
 
@@ -48,21 +34,18 @@ def parse_caption(caption: str) -> Optional[dict]:
         logger.warning("Caption needs 4 parts, got %d: %r", len(parts), caption)
         return None
 
-    # AniList ID
     try:
         anilist_id = int(parts[0])
     except ValueError:
         logger.warning("AniList ID must be an integer, got: %r", parts[0])
         return None
 
-    # Episode
     try:
         episode = int(parts[1])
     except ValueError:
         logger.warning("Episode must be an integer, got: %r", parts[1])
         return None
 
-    # Audio type — normalise to lowercase, warn if unknown
     audio_type = parts[2].lower().strip()
     if audio_type not in AUDIO_TYPES:
         logger.warning(
@@ -70,12 +53,9 @@ def parse_caption(caption: str) -> Optional[dict]:
             audio_type, ", ".join(sorted(AUDIO_TYPES)),
         )
 
-    # Quality — normalise to lowercase, warn if unrecognised pattern
     quality = parts[3].lower().strip()
     if not _QUALITY_RE.match(quality):
-        logger.warning(
-            "Unrecognised quality token %r — accepting as-is.", quality
-        )
+        logger.warning("Unrecognised quality token %r — accepting as-is.", quality)
 
     return {
         "anilist_id": anilist_id,
@@ -89,15 +69,6 @@ def parse_caption(caption: str) -> Optional[dict]:
 # Filename parser  —  "Show Name - Episode - Quality.ext"
 # ---------------------------------------------------------------------------
 
-# Strategy: split on " - " from the RIGHT so that show names containing
-# " - " (e.g. "ReZERO -Starting Life in Another World-") are preserved.
-#
-# We expect the last two " - "-separated tokens to be:
-#   …token[-2] = episode number (digits, optionally with decimal like "1.5")
-#   …token[-1] = quality token (then strip extension)
-#
-# Everything before those two tokens is the anime name.
-
 _SEPARATOR = " - "
 
 
@@ -106,26 +77,24 @@ def parse_filename(filename: str) -> Optional[dict]:
     Parse auto-mode filename:
         Show Name - Episode - Quality.ext
 
-    Examples that now all work:
+    Handles Telegram double-extensions like 'Show - 1 - 720p.mkv.mp4'
+    by stripping all trailing video extensions before parsing.
+
+    Examples that all work:
         ReZERO -Starting Life in Another World- - 1 - 360p.mkv
+        ReZERO -Starting Life in Another World- - 1 - 360p.mkv.mp4  ← Telegram mangled
         Attack on Titan - 12 - 1080p.mp4
         Demon Slayer - Kimetsu no Yaiba - 5 - 720p.mkv
-        Some Show - 1.5 - BD.mkv          ← decimal episodes
-        Some Show - 01 - WEB.mp4           ← zero-padded episodes
-        Some Show - 3 - 4K.mkv             ← 4K quality
-        Some Show - 7 - HEVC.mkv           ← HEVC quality
-
-    Returns {anime_name, episode, quality} or None.
+        Some Show - 1.5 - BD.mkv
+        Some Show - 01 - WEB.mp4
+        Some Show - 3 - 4K.mkv
+        Some Show - 7 - HEVC.mkv
     """
     filename = filename.strip()
 
-    # Strip the file extension (keep it for validation)
-    base, ext = _split_ext(filename)
-    if ext and ext.lower() not in _VIDEO_EXTS:
-        # Not a video extension — still try to parse (Telegram may strip ext)
-        logger.warning("Unexpected extension %r in filename %r", ext, filename)
+    # Strip ALL trailing extensions (handles .mkv.mp4 double-ext from Telegram)
+    base, _ = _strip_video_exts(filename)
 
-    # Split on " - " and work from the right
     parts = base.split(_SEPARATOR)
     if len(parts) < 3:
         logger.warning(
@@ -142,7 +111,7 @@ def parse_filename(filename: str) -> Optional[dict]:
         )
         return None
 
-    # Second-to-last part → episode number (int or decimal like 1.5)
+    # Second-to-last part → episode number
     episode_raw = parts[-2].strip()
     episode = _parse_episode(episode_raw)
     if episode is None:
@@ -152,7 +121,7 @@ def parse_filename(filename: str) -> Optional[dict]:
         )
         return None
 
-    # Everything before → anime name (re-join with the original separator)
+    # Everything before → anime name
     anime_name = _SEPARATOR.join(parts[:-2]).strip()
     if not anime_name:
         logger.warning("Could not extract anime name from filename %r", filename)
@@ -169,12 +138,38 @@ def parse_filename(filename: str) -> Optional[dict]:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _split_ext(filename: str):
-    """Split filename into (base, ext). Returns ('name', '') if no dot."""
-    dot_idx = filename.rfind(".")
-    if dot_idx == -1 or dot_idx == 0:
-        return filename, ""
-    return filename[:dot_idx], filename[dot_idx:]
+def _strip_video_exts(filename: str):
+    """
+    Strip ALL trailing video extensions, including Telegram double-extensions.
+
+    'Show - 1 - 720p.mkv.mp4'  →  ('Show - 1 - 720p', '.mkv')
+    'Show - 1 - 720p.mkv'      →  ('Show - 1 - 720p', '.mkv')
+    'Show - 1 - 720p'          →  ('Show - 1 - 720p', '')
+
+    Strategy:
+      - Always strip the outermost extension on the first pass, even if it's
+        not a known video ext (Telegram can append anything like .mp4 on top).
+      - Keep peeling as long as extensions are known video formats.
+    """
+    base = filename
+    last_video_ext = ""
+
+    for i in range(6):  # safety cap
+        dot_idx = base.rfind(".")
+        if dot_idx <= 0:
+            break
+        ext = base[dot_idx:].lower()
+        if ext in _VIDEO_EXTS:
+            last_video_ext = ext
+            base = base[:dot_idx]
+        elif i == 0:
+            # First pass only: strip unknown outer ext (e.g. Telegram appended it)
+            base = base[:dot_idx]
+        else:
+            # Inner token is not a video ext — stop peeling
+            break
+
+    return base, last_video_ext
 
 
 def _parse_episode(s: str):
@@ -187,6 +182,23 @@ def _parse_episode(s: str):
         return int(f) if f == int(f) else f
     except ValueError:
         return None
+
+
+def sanitize_search_name(name: str) -> str:
+    """
+    Clean an anime name for use as an AniList search query.
+    AniList rejects queries with certain special characters (returns HTTP 400).
+    Removes: parenthetical suffixes, trailing punctuation clusters.
+    Keeps:   letters, digits, spaces, single hyphens, colons, apostrophes.
+    """
+    # Remove anything in parentheses or brackets at the end
+    name = re.sub(r"[\(\[].*?[\)\]]", "", name)
+    # Remove characters AniList's search chokes on (!, -, dashes at boundaries)
+    name = re.sub(r"[^\w\s\-\:\'.]", " ", name)
+    # Collapse multiple spaces/hyphens
+    name = re.sub(r"\s+", " ", name)
+    name = re.sub(r"-{2,}", "-", name)
+    return name.strip(" -")
 
 
 def normalize_anime_name(name: str) -> str:
