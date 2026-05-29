@@ -47,6 +47,25 @@ video{position:absolute;inset:0;width:100%;height:100%;
 #spinner svg{width:46px;height:46px;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* ── Error overlay ── */
+#err-overlay{
+  display:none;position:absolute;inset:0;z-index:90;
+  align-items:center;justify-content:center;flex-direction:column;gap:14px;
+  background:rgba(0,0,0,.82);backdrop-filter:blur(6px);
+}
+#err-overlay.show{display:flex}
+#err-icon{width:52px;height:52px;fill:#e05555;flex-shrink:0}
+#err-title{font-size:17px;font-weight:700;color:#fff}
+#err-msg{font-size:13px;color:rgba(255,255,255,.55);text-align:center;max-width:320px;line-height:1.6}
+#err-retry{
+  margin-top:4px;padding:9px 22px;cursor:pointer;
+  background:var(--glass);border:1.5px solid var(--gold);
+  backdrop-filter:blur(14px);border-radius:8px;
+  color:var(--gold2);font-size:13px;font-weight:700;
+  transition:background .15s,transform .12s;
+}
+#err-retry:hover{background:rgba(201,162,39,.18);transform:scale(1.03)}
+
 /* ── Toast ── */
 #toast{
   position:absolute;top:14px;left:50%;transform:translateX(-50%);
@@ -359,6 +378,14 @@ video{position:absolute;inset:0;width:100%;height:100%;
       <circle cx="12" cy="12" r="10" stroke-opacity=".18"/>
       <path d="M12 2a10 10 0 0 1 10 10"/>
     </svg>
+  </div>
+
+  <!-- Error overlay -->
+  <div id="err-overlay">
+    <svg id="err-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+    <div id="err-title">Video unavailable</div>
+    <div id="err-msg"></div>
+    <button id="err-retry">Retry</button>
   </div>
 
   <!-- Flash -->
@@ -1040,7 +1067,26 @@ class Player {
       this._onEnded();
     });
     V.addEventListener('error',()=>{
-      emit('error',{code:V.error?.code,message:V.error?.message});
+      const code=V.error?.code;
+      const msg=V.error?.message||'';
+      hideSpin();
+      const errMsgs={
+        1:'Playback was aborted.',
+        2:'A network error occurred while loading the video.',
+        3:'The video could not be decoded.',
+        4:'The video format is not supported or the stream is unavailable.',
+      };
+      const friendly=errMsgs[code]||(msg||'The stream could not be loaded. Make sure the Telegram bot is connected and the token is valid.');
+      $('err-msg').textContent=friendly;
+      $('err-overlay').classList.add('show');
+      emit('error',{code,message:msg});
+    });
+    $('err-retry').addEventListener('click',e=>{
+      e.stopPropagation();
+      $('err-overlay').classList.remove('show');
+      const pos=V.currentTime;
+      V.load();
+      V.addEventListener('loadedmetadata',()=>{V.currentTime=pos;V.play().catch(()=>{});},{once:true});
     });
     V.addEventListener('seeking',()=>{
       emit('seeking',{currentTime:V.currentTime});

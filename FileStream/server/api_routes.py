@@ -66,6 +66,8 @@ _POSTER_CACHE_TTL = 86400  # 24 hours
 
 
 def _pick_client():
+    if not work_loads or not multi_clients:
+        raise web.HTTPServiceUnavailable(text="Telegram bot is not connected. Please ensure the bot is running with valid credentials.")
     index = min(work_loads, key=work_loads.get)
     return index, multi_clients[index]
 
