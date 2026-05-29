@@ -17,7 +17,7 @@ _URL = "https://graphql.anilist.co"
 
 _FIELDS = """
     id
-    malId
+    idMal
     title {
         romaji
         english
@@ -260,7 +260,7 @@ def _parse_media(media: dict) -> dict:
 
     return {
         "anilist_id": media["id"],
-        "mal_id": media.get("malId"),
+        "mal_id": media.get("idMal"),
         "name": title,
         "slug": make_slug(title),
         "cover_url": cover_url,
