@@ -12,10 +12,79 @@ from FileStream.utils.site_db import get_episode_by_token, delete_episode_by_tok
 from FileStream.bot import FileStream
 from FileStream.config import Telegram, Server, Site
 from pyrogram import filters, Client
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.enums.parse_mode import ParseMode
 
 broadcast_ids = {}
+
+_MODE_LABELS = {
+    "anilist_id": "📋 AniList ID mode",
+    "auto_sub":   "🔤 Auto Sub (filename)",
+    "auto_dub":   "🔤 Auto Dub (filename)",
+}
+
+
+def _mode_keyboard(current: str) -> InlineKeyboardMarkup:
+    def btn(mode):
+        label = _MODE_LABELS[mode]
+        if mode == current:
+            label = "✅ " + label
+        return InlineKeyboardButton(label, callback_data=f"setmode_{mode}")
+    return InlineKeyboardMarkup([
+        [btn("anilist_id")],
+        [btn("auto_sub"), btn("auto_dub")],
+    ])
+
+
+@FileStream.on_message(filters.command("mode") & filters.private & filters.user(Telegram.OWNER_ID))
+async def admin_mode(c: Client, m: Message):
+    current = await bot_db.get_upload_mode()
+    await m.reply_text(
+        "<b>Upload Mode</b>\n\n"
+        "Select how the bot reads incoming video files:\n\n"
+        "<b>AniList ID mode</b> — caption: <code>AniList ID | Episode | sub/dub | quality</code>\n"
+        "<b>Auto Sub/Dub</b>    — filename: <code>Show Name - Episode - Quality.ext</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_mode_keyboard(current),
+        quote=True,
+    )
+
+
+@FileStream.on_callback_query(
+    filters.user(Telegram.OWNER_ID)
+    & filters.regex(r"^setmode_(.+)$")
+)
+async def cb_set_mode(c: Client, update: CallbackQuery):
+    mode = update.data.split("_", 1)[1]
+    if mode not in _MODE_LABELS:
+        await update.answer("Unknown mode", show_alert=True)
+        return
+    await bot_db.set_upload_mode(mode)
+    label = _MODE_LABELS[mode]
+    await update.message.edit_text(
+        f"✅ <b>Mode set to:</b> {label}\n\n"
+        f"All future uploads will use this mode.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_mode_keyboard(mode),
+    )
+    await update.answer(f"Mode: {label}")
+
+
+@FileStream.on_message(filters.command("stop") & filters.private & filters.user(Telegram.OWNER_ID))
+async def admin_stop(c: Client, m: Message):
+    from FileStream.bot.plugins.anime_handler import _active_tasks
+    count = len(_active_tasks)
+    if count == 0:
+        await m.reply_text("ℹ️ No active uploads to stop.", quote=True)
+        return
+    for task in list(_active_tasks.values()):
+        task.cancel()
+    _active_tasks.clear()
+    await m.reply_text(
+        f"🛑 <b>Stopped {count} active upload(s).</b>",
+        parse_mode=ParseMode.HTML,
+        quote=True,
+    )
 
 
 @FileStream.on_message(filters.command("status") & filters.private & filters.user(Telegram.OWNER_ID))
@@ -113,11 +182,11 @@ async def admin_del(c: Client, m: Message):
         )
         return
 
+    anilist_id = ep.get("anilist_id") or "?"
     info = (
         f"**Found episode — deleting…**\n"
-        f"Anime: `{ep['anime_name']}`\n"
-        f"Season `{ep['season']}` · Episode `{ep['episode']}`\n"
-        f"Quality: `{ep['quality']}` · Audio: `{ep['audio_type']}`\n"
+        f"Anime: `{ep['anime_name']}` (AniList: `{anilist_id}`)\n"
+        f"Episode `{ep['episode']}` · Quality `{ep['quality']}` · Audio `{ep['audio_type']}`\n"
         f"File size: `{ep.get('file_size', 0) // 1_000_000} MB`"
     )
     msg = await m.reply_text(info, parse_mode=ParseMode.MARKDOWN, quote=True)
@@ -136,8 +205,7 @@ async def admin_del(c: Client, m: Message):
             dump_note = "could not delete from channel (no permission or already gone)"
 
     await msg.edit_text(
-        f"✅ **Deleted:** `{ep['anime_name']}` "
-        f"S{str(ep['season']).zfill(2)}E{str(ep['episode']).zfill(2)} "
+        f"✅ **Deleted:** `{ep['anime_name']}` E{str(ep['episode']).zfill(2)} "
         f"({ep['quality']} / {ep['audio_type']})\n"
         f"Dump channel: {dump_note}",
         parse_mode=ParseMode.MARKDOWN

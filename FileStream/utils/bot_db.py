@@ -44,6 +44,11 @@ async def init_bot_db():
                 message TEXT NOT NULL,
                 created_at REAL NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
         """)
         await db.commit()
     logger.info("Bot DB initialized at %s", DB_PATH)
@@ -171,3 +176,31 @@ async def get_recent_logs(limit: int = 50) -> List[dict]:
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
+
+
+# ── Settings ────────────────────────────────────────────────────────────────
+
+async def get_setting(key: str, default: str = "") -> str:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else default
+
+
+async def set_setting(key: str, value: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value)
+        )
+        await db.commit()
+
+
+async def get_upload_mode() -> str:
+    """Returns: 'anilist_id' | 'auto_sub' | 'auto_dub'"""
+    return await get_setting("upload_mode", "anilist_id")
+
+
+async def set_upload_mode(mode: str):
+    await set_setting("upload_mode", mode)

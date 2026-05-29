@@ -1,6 +1,9 @@
 """
 Site SQLite database — stores anime series, episodes, and stream tokens.
 This is the DB the website queries. Separate from the bot DB.
+
+Episodes are keyed by anilist_id (not slug/season). Season is stored as 1
+internally for all entries; the AniList ID already encodes the season.
 """
 import os
 import time
@@ -22,6 +25,7 @@ async def init_site_db():
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS anime (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                anilist_id INTEGER UNIQUE,
                 name TEXT NOT NULL,
                 slug TEXT NOT NULL UNIQUE,
                 created_at REAL NOT NULL
@@ -30,7 +34,7 @@ async def init_site_db():
             CREATE TABLE IF NOT EXISTS episodes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 anime_id INTEGER NOT NULL REFERENCES anime(id),
-                season INTEGER NOT NULL,
+                season INTEGER NOT NULL DEFAULT 1,
                 episode INTEGER NOT NULL,
                 audio_type TEXT NOT NULL,
                 quality TEXT NOT NULL,
@@ -45,7 +49,7 @@ async def init_site_db():
             CREATE TABLE IF NOT EXISTS subtitles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 anime_id INTEGER NOT NULL REFERENCES anime(id),
-                season INTEGER NOT NULL,
+                season INTEGER NOT NULL DEFAULT 1,
                 episode INTEGER NOT NULL,
                 label TEXT NOT NULL DEFAULT 'Subtitle',
                 lang TEXT NOT NULL DEFAULT 'en',
@@ -62,15 +66,21 @@ async def init_site_db():
                 ON subtitles(anime_id, season, episode);
         """)
         await db.commit()
+
+    # Migration: add anilist_id column to anime table if it doesn't exist yet
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute("ALTER TABLE anime ADD COLUMN anilist_id INTEGER")
+            await db.commit()
+            logger.info("Migrated anime table: added anilist_id column")
+        except Exception:
+            pass  # Column already exists
+
     logger.info("Site DB initialized at %s", DB_PATH)
 
 
-def _make_token(anime_slug, season, episode, audio_type, quality):
-    """
-    Generate an HMAC-signed, obfuscated stream token.
-    Non-guessable — the site uses this to request streams.
-    """
-    payload = "{}:{}:{}:{}:{}:{}".format(anime_slug, season, episode, audio_type, quality, int(time.time()))
+def _make_token(anilist_id, episode, audio_type, quality):
+    payload = "{}:{}:{}:{}:{}".format(anilist_id, episode, audio_type, quality, int(time.time()))
     sig = hmac.HMAC(
         Site.STREAM_SECRET.encode(),
         payload.encode(),
@@ -80,36 +90,70 @@ def _make_token(anime_slug, season, episode, audio_type, quality):
     return "{}{}".format(rand, sig)
 
 
-async def get_or_create_anime(name, slug):
+# ── Anime ────────────────────────────────────────────────────────────────────
+
+async def get_or_create_anime(name: str, slug: str, anilist_id: Optional[int] = None) -> int:
+    """Return internal anime.id, creating the row if needed."""
     async with aiosqlite.connect(DB_PATH) as db:
+        # Try to find by anilist_id first (most reliable)
+        if anilist_id:
+            async with db.execute("SELECT id FROM anime WHERE anilist_id = ?", (anilist_id,)) as cur:
+                row = await cur.fetchone()
+            if row:
+                # Update name/slug in case they changed
+                await db.execute(
+                    "UPDATE anime SET name=?, slug=? WHERE anilist_id=?",
+                    (name, slug, anilist_id)
+                )
+                await db.commit()
+                return row[0]
+
+        # Fall back to slug lookup
         async with db.execute("SELECT id FROM anime WHERE slug = ?", (slug,)) as cur:
             row = await cur.fetchone()
         if row:
+            if anilist_id:
+                await db.execute(
+                    "UPDATE anime SET anilist_id=?, name=? WHERE slug=?",
+                    (anilist_id, name, slug)
+                )
+                await db.commit()
             return row[0]
+
         cur = await db.execute(
-            "INSERT INTO anime (name, slug, created_at) VALUES (?, ?, ?)",
-            (name, slug, time.time())
+            "INSERT INTO anime (anilist_id, name, slug, created_at) VALUES (?, ?, ?, ?)",
+            (anilist_id, name, slug, time.time())
         )
         await db.commit()
         return cur.lastrowid
 
 
+async def get_anime_by_anilist_id(anilist_id: int) -> Optional[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM anime WHERE anilist_id = ?", (anilist_id,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+# ── Episodes ─────────────────────────────────────────────────────────────────
+
 async def upsert_episode(
-    anime_id,
-    season,
-    episode,
-    audio_type,
-    quality,
-    dump_msg_id,
-    dump_channel_id,
-    file_size,
-    anime_slug,
-):
-    """Insert or replace an episode. Returns the stream token."""
+    anime_id: int,
+    episode: int,
+    audio_type: str,
+    quality: str,
+    dump_msg_id: int,
+    dump_channel_id: int,
+    file_size: int,
+    anilist_id: int,
+    season: int = 1,
+) -> str:
+    """Insert or update an episode. Returns the stream token."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             """SELECT stream_token FROM episodes
-               WHERE anime_id = ? AND season = ? AND episode = ? AND audio_type = ? AND quality = ?""",
+               WHERE anime_id=? AND season=? AND episode=? AND audio_type=? AND quality=?""",
             (anime_id, season, episode, audio_type, quality)
         ) as cur:
             row = await cur.fetchone()
@@ -119,10 +163,11 @@ async def upsert_episode(
             await db.execute(
                 """UPDATE episodes SET dump_msg_id=?, dump_channel_id=?, file_size=?
                    WHERE anime_id=? AND season=? AND episode=? AND audio_type=? AND quality=?""",
-                (dump_msg_id, dump_channel_id, file_size, anime_id, season, episode, audio_type, quality)
+                (dump_msg_id, dump_channel_id, file_size,
+                 anime_id, season, episode, audio_type, quality)
             )
         else:
-            token = _make_token(anime_slug, season, episode, audio_type, quality)
+            token = _make_token(anilist_id, episode, audio_type, quality)
             await db.execute(
                 """INSERT INTO episodes
                    (anime_id, season, episode, audio_type, quality, stream_token,
@@ -135,11 +180,11 @@ async def upsert_episode(
         return token
 
 
-async def get_episode_by_token(token):
+async def get_episode_by_token(token: str) -> Optional[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """SELECT e.*, a.name as anime_name, a.slug as anime_slug
+            """SELECT e.*, a.name AS anime_name, a.slug AS anime_slug, a.anilist_id
                FROM episodes e JOIN anime a ON e.anime_id = a.id
                WHERE e.stream_token = ?""",
             (token,)
@@ -148,54 +193,82 @@ async def get_episode_by_token(token):
             return dict(row) if row else None
 
 
-async def get_anime_list():
+async def get_episode_by_dump_msg(dump_msg_id: int, dump_channel_id: int) -> Optional[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """SELECT a.id, a.name, a.slug,
-                      COUNT(e.id) as episode_count,
-                      MAX(e.season) as max_season
+            """SELECT e.*, a.name AS anime_name, a.slug AS anime_slug, a.anilist_id
+               FROM episodes e JOIN anime a ON e.anime_id = a.id
+               WHERE e.dump_msg_id=? AND e.dump_channel_id=?""",
+            (dump_msg_id, dump_channel_id)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def get_anime_list() -> List[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT a.id, a.anilist_id, a.name, a.slug,
+                      COUNT(DISTINCT e.episode) AS episode_count
                FROM anime a LEFT JOIN episodes e ON e.anime_id = a.id
-               GROUP BY a.id ORDER BY a.name""",
+               GROUP BY a.id ORDER BY a.name"""
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
 
-async def get_episodes_for_anime(slug, season=None):
+async def get_episodes_for_anime(anilist_id: int, episode: Optional[int] = None) -> List[dict]:
+    """Return episodes for an anime, optionally filtered to a single episode number."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        if season is not None:
+        if episode is not None:
             async with db.execute(
-                """SELECT e.season, e.episode, e.audio_type, e.quality,
+                """SELECT e.episode, e.audio_type, e.quality,
                           e.stream_token, e.file_size, e.created_at
                    FROM episodes e JOIN anime a ON e.anime_id = a.id
-                   WHERE a.slug = ? AND e.season = ?
-                   ORDER BY e.episode, e.audio_type, e.quality""",
-                (slug, season)
+                   WHERE a.anilist_id=? AND e.episode=?
+                   ORDER BY e.audio_type, e.quality""",
+                (anilist_id, episode)
             ) as cur:
                 rows = await cur.fetchall()
         else:
             async with db.execute(
-                """SELECT e.season, e.episode, e.audio_type, e.quality,
+                """SELECT e.episode, e.audio_type, e.quality,
                           e.stream_token, e.file_size, e.created_at
                    FROM episodes e JOIN anime a ON e.anime_id = a.id
-                   WHERE a.slug = ?
-                   ORDER BY e.season, e.episode, e.audio_type, e.quality""",
-                (slug,)
+                   WHERE a.anilist_id=?
+                   ORDER BY e.episode, e.audio_type, e.quality""",
+                (anilist_id,)
             ) as cur:
                 rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
 
-async def get_episode_qualities(slug, season, episode):
-    """Return all available quality options for one episode (for the site quality picker)."""
+async def get_episode_qualities(anilist_id: int, episode: int) -> List[dict]:
+    """All quality options for a specific episode."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT e.audio_type, e.quality, e.stream_token, e.file_size
                FROM episodes e JOIN anime a ON e.anime_id = a.id
-               WHERE a.slug = ? AND e.season = ? AND e.episode = ?
+               WHERE a.anilist_id=? AND e.episode=?
+               ORDER BY e.audio_type, e.quality""",
+            (anilist_id, episode)
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def get_episode_qualities_by_slug(slug: str, season: int, episode: int) -> List[dict]:
+    """Legacy: look up by slug+season+episode (used by player route)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT e.audio_type, e.quality, e.stream_token, e.file_size
+               FROM episodes e JOIN anime a ON e.anime_id = a.id
+               WHERE a.slug=? AND e.season=? AND e.episode=?
                ORDER BY e.audio_type, e.quality""",
             (slug, season, episode)
         ) as cur:
@@ -203,52 +276,68 @@ async def get_episode_qualities(slug, season, episode):
             return [dict(r) for r in rows]
 
 
+async def delete_episode_by_token(token: str) -> Optional[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT e.*, a.name AS anime_name, a.slug AS anime_slug, a.anilist_id
+               FROM episodes e JOIN anime a ON e.anime_id = a.id
+               WHERE e.stream_token=?""",
+            (token,)
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        anime_id = data["anime_id"]
+        await db.execute("DELETE FROM episodes WHERE stream_token=?", (token,))
+        async with db.execute(
+            "SELECT COUNT(*) FROM episodes WHERE anime_id=?", (anime_id,)
+        ) as cur:
+            cnt = await cur.fetchone()
+        if cnt and cnt[0] == 0:
+            await db.execute("DELETE FROM anime WHERE id=?", (anime_id,))
+        await db.commit()
+        logger.info("Deleted episode token=%s (%s E%s)", token, data["anime_name"], data["episode"])
+        return data
+
+
 async def delete_episode_by_dump_msg(dump_msg_id: int, dump_channel_id: int) -> bool:
-    """
-    Delete the episode row whose dump message was deleted from Telegram.
-    Also removes the parent anime row if it has no episodes left.
-    Returns True if a row was deleted.
-    """
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT id, anime_id FROM episodes WHERE dump_msg_id = ? AND dump_channel_id = ?",
+            "SELECT id, anime_id FROM episodes WHERE dump_msg_id=? AND dump_channel_id=?",
             (dump_msg_id, dump_channel_id)
         ) as cur:
             row = await cur.fetchone()
-
         if not row:
             return False
-
         ep_id, anime_id = row
-        await db.execute("DELETE FROM episodes WHERE id = ?", (ep_id,))
-
-        # Clean up the anime row if it has no more episodes
+        await db.execute("DELETE FROM episodes WHERE id=?", (ep_id,))
         async with db.execute(
-            "SELECT COUNT(*) FROM episodes WHERE anime_id = ?", (anime_id,)
+            "SELECT COUNT(*) FROM episodes WHERE anime_id=?", (anime_id,)
         ) as cur:
-            count_row = await cur.fetchone()
-        if count_row and count_row[0] == 0:
-            await db.execute("DELETE FROM anime WHERE id = ?", (anime_id,))
-
+            cnt = await cur.fetchone()
+        if cnt and cnt[0] == 0:
+            await db.execute("DELETE FROM anime WHERE id=?", (anime_id,))
         await db.commit()
-        logger.info("Deleted episode for dump_msg_id=%s from channel=%s", dump_msg_id, dump_channel_id)
         return True
 
 
-async def upsert_subtitle(anime_id, season, episode, label, lang, file_id):
-    """Insert or replace a subtitle track for an episode. Returns the subtitle row id."""
+# ── Subtitles ────────────────────────────────────────────────────────────────
+
+async def upsert_subtitle(
+    anime_id: int, episode: int, label: str, lang: str, file_id: str, season: int = 1
+) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            """SELECT id FROM subtitles
-               WHERE anime_id = ? AND season = ? AND episode = ? AND lang = ?""",
+            "SELECT id FROM subtitles WHERE anime_id=? AND season=? AND episode=? AND lang=?",
             (anime_id, season, episode, lang)
         ) as cur:
             row = await cur.fetchone()
         if row:
             await db.execute(
-                """UPDATE subtitles SET label=?, file_id=?, created_at=?
-                   WHERE anime_id=? AND season=? AND episode=? AND lang=?""",
-                (label, file_id, time.time(), anime_id, season, episode, lang)
+                "UPDATE subtitles SET label=?, file_id=?, created_at=? WHERE id=?",
+                (label, file_id, time.time(), row[0])
             )
             sub_id = row[0]
         else:
@@ -262,14 +351,28 @@ async def upsert_subtitle(anime_id, season, episode, label, lang, file_id):
         return sub_id
 
 
-async def get_subtitles_for_episode(slug, season, episode):
-    """Return all subtitle tracks for a given episode."""
+async def get_subtitles_for_episode(anilist_id: int, episode: int) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT s.id, s.label, s.lang, s.file_id
                FROM subtitles s JOIN anime a ON s.anime_id = a.id
-               WHERE a.slug = ? AND s.season = ? AND s.episode = ?
+               WHERE a.anilist_id=? AND s.episode=?
+               ORDER BY s.lang""",
+            (anilist_id, episode)
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def get_subtitles_for_episode_by_slug(slug: str, season: int, episode: int) -> List[dict]:
+    """Legacy slug-based lookup used by the player."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT s.id, s.label, s.lang, s.file_id
+               FROM subtitles s JOIN anime a ON s.anime_id = a.id
+               WHERE a.slug=? AND s.season=? AND s.episode=?
                ORDER BY s.lang""",
             (slug, season, episode)
         ) as cur:
@@ -277,78 +380,20 @@ async def get_subtitles_for_episode(slug, season, episode):
             return [dict(r) for r in rows]
 
 
-async def get_subtitle_by_id(sub_id):
-    """Return a single subtitle row by its id."""
+async def get_subtitle_by_id(sub_id: int) -> Optional[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT * FROM subtitles WHERE id = ?", (sub_id,)
-        ) as cur:
+        async with db.execute("SELECT * FROM subtitles WHERE id=?", (sub_id,)) as cur:
             row = await cur.fetchone()
             return dict(row) if row else None
 
 
-async def delete_subtitle_by_id(sub_id):
-    """Delete a subtitle track by id. Returns True if deleted."""
+async def delete_subtitle_by_id(sub_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT id FROM subtitles WHERE id = ?", (sub_id,)) as cur:
+        async with db.execute("SELECT id FROM subtitles WHERE id=?", (sub_id,)) as cur:
             row = await cur.fetchone()
         if not row:
             return False
-        await db.execute("DELETE FROM subtitles WHERE id = ?", (sub_id,))
+        await db.execute("DELETE FROM subtitles WHERE id=?", (sub_id,))
         await db.commit()
         return True
-
-
-async def delete_episode_by_token(token: str) -> Optional[dict]:
-    """
-    Delete an episode by stream token.
-    Also removes the parent anime row if it has no episodes left.
-    Returns the deleted episode dict, or None if not found.
-    """
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            """SELECT e.*, a.name as anime_name, a.slug as anime_slug
-               FROM episodes e JOIN anime a ON e.anime_id = a.id
-               WHERE e.stream_token = ?""",
-            (token,)
-        ) as cur:
-            row = await cur.fetchone()
-
-        if not row:
-            return None
-
-        data = dict(row)
-        anime_id = data["anime_id"]
-
-        await db.execute("DELETE FROM episodes WHERE stream_token = ?", (token,))
-
-        async with db.execute(
-            "SELECT COUNT(*) FROM episodes WHERE anime_id = ?", (anime_id,)
-        ) as cur:
-            count_row = await cur.fetchone()
-        if count_row and count_row[0] == 0:
-            await db.execute("DELETE FROM anime WHERE id = ?", (anime_id,))
-
-        await db.commit()
-        logger.info(
-            "Deleted episode token=%s  (%s S%sE%s %s/%s)",
-            token, data["anime_name"], data["season"], data["episode"],
-            data["audio_type"], data["quality"]
-        )
-        return data
-
-
-async def get_episode_by_dump_msg(dump_msg_id: int, dump_channel_id: int):
-    """Look up an episode by its dump channel message ID."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            """SELECT e.*, a.name as anime_name, a.slug as anime_slug
-               FROM episodes e JOIN anime a ON e.anime_id = a.id
-               WHERE e.dump_msg_id = ? AND e.dump_channel_id = ?""",
-            (dump_msg_id, dump_channel_id)
-        ) as cur:
-            row = await cur.fetchone()
-            return dict(row) if row else None

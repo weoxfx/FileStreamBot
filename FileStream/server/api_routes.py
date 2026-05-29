@@ -10,9 +10,9 @@ Public (no auth):
 
 API-key protected (X-API-Key header):
   GET /api/anime
-  GET /api/anime/{slug}
-  GET /api/episodes/{slug}[?season=N[&episode=N]]
-  GET /api/qualities/{slug}/{season}/{episode}
+  GET /api/anime/{anilist_id}
+  GET /api/episodes/{anilist_id}[?episode=N]
+  GET /api/qualities/{anilist_id}/{episode}
 """
 import time
 import math
@@ -95,16 +95,22 @@ async def player_handler(request: web.Request):
     if not ep:
         raise web.HTTPNotFound(text="Stream token not found")
 
-    qualities = await site_db.get_episode_qualities(
-        ep["anime_slug"], ep["season"], ep["episode"]
-    )
+    anilist_id = ep.get("anilist_id")
+    if anilist_id:
+        qualities = await site_db.get_episode_qualities(anilist_id, ep["episode"])
+    else:
+        qualities = await site_db.get_episode_qualities_by_slug(
+            ep["anime_slug"], ep["season"], ep["episode"]
+        )
 
     # Build next-episode token if one exists
     next_token = None
     try:
-        all_eps = await site_db.get_episodes_for_anime(ep["anime_slug"], ep["season"])
+        if anilist_id:
+            all_eps = await site_db.get_episodes_for_anime(anilist_id)
+        else:
+            all_eps = []
         next_ep_num = ep["episode"] + 1
-        # Prefer same audio_type
         next_candidates = [
             e for e in all_eps
             if e["episode"] == next_ep_num and e["audio_type"] == ep["audio_type"]
@@ -116,9 +122,12 @@ async def player_handler(request: web.Request):
     except Exception:
         pass
 
-    raw_subs = await site_db.get_subtitles_for_episode(
-        ep["anime_slug"], ep["season"], ep["episode"]
-    )
+    if anilist_id:
+        raw_subs = await site_db.get_subtitles_for_episode(anilist_id, ep["episode"])
+    else:
+        raw_subs = await site_db.get_subtitles_for_episode_by_slug(
+            ep["anime_slug"], ep["season"], ep["episode"]
+        )
     subtitles = [
         {"id": s["id"], "label": s["label"], "lang": s["lang"], "url": "/subtitle/" + str(s["id"])}
         for s in raw_subs
@@ -515,64 +524,68 @@ async def list_anime(request: web.Request):
         return web.json_response({"error": str(e)}, status=500)
 
 
-@routes.get("/api/anime/{slug}")
+@routes.get("/api/anime/{anilist_id}")
 @_require_key
 async def anime_detail(request: web.Request):
-    slug = request.match_info["slug"]
     try:
-        eps = await site_db.get_episodes_for_anime(slug)
+        anilist_id = int(request.match_info["anilist_id"])
+    except ValueError:
+        return web.json_response({"error": "anilist_id must be an integer"}, status=400)
+    try:
+        eps = await site_db.get_episodes_for_anime(anilist_id)
         if not eps:
             return web.json_response({"error": "Not found"}, status=404)
-        seasons = {}
-        for ep in eps:
-            s = ep["season"]
-            seasons.setdefault(s, set()).add(ep["episode"])
+        episode_nums = sorted({ep["episode"] for ep in eps})
+        anime = await site_db.get_anime_by_anilist_id(anilist_id)
         return web.json_response({
-            "slug": slug,
-            "seasons": {str(s): sorted(v) for s, v in seasons.items()},
+            "anilist_id": anilist_id,
+            "name":       anime["name"] if anime else "",
+            "slug":       anime["slug"] if anime else "",
+            "episodes":   episode_nums,
         })
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
 
-@routes.get("/api/episodes/{slug}")
+@routes.get("/api/episodes/{anilist_id}")
 @_require_key
 async def episodes_handler(request: web.Request):
-    slug = request.match_info["slug"]
-    sq   = request.rel_url.query.get("season")
-    eq   = request.rel_url.query.get("episode")
     try:
-        season = int(sq) if sq else None
+        anilist_id = int(request.match_info["anilist_id"])
     except ValueError:
-        return web.json_response({"error": "season must be integer"}, status=400)
+        return web.json_response({"error": "anilist_id must be an integer"}, status=400)
+    eq = request.rel_url.query.get("episode")
     try:
-        if eq and season is not None:
-            qualities = await site_db.get_episode_qualities(slug, season, int(eq))
+        if eq is not None:
+            episode    = int(eq)
+            qualities  = await site_db.get_episode_qualities(anilist_id, episode)
             return web.json_response({
-                "slug": slug, "season": season, "episode": int(eq),
-                "qualities": qualities,
+                "anilist_id": anilist_id,
+                "episode":    episode,
+                "qualities":  qualities,
             })
-        eps = await site_db.get_episodes_for_anime(slug, season)
-        return web.json_response({"slug": slug, "episodes": eps})
+        eps = await site_db.get_episodes_for_anime(anilist_id)
+        return web.json_response({"anilist_id": anilist_id, "episodes": eps})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
 
-@routes.get("/api/qualities/{slug}/{season}/{episode}")
+@routes.get("/api/qualities/{anilist_id}/{episode}")
 @_require_key
 async def qualities_handler(request: web.Request):
-    slug = request.match_info["slug"]
     try:
-        season  = int(request.match_info["season"])
-        episode = int(request.match_info["episode"])
+        anilist_id = int(request.match_info["anilist_id"])
+        episode    = int(request.match_info["episode"])
     except ValueError:
-        return web.json_response({"error": "season/episode must be integers"}, status=400)
+        return web.json_response({"error": "anilist_id/episode must be integers"}, status=400)
     try:
-        qs = await site_db.get_episode_qualities(slug, season, episode)
+        qs = await site_db.get_episode_qualities(anilist_id, episode)
         if not qs:
             return web.json_response({"error": "Not found"}, status=404)
         return web.json_response({
-            "slug": slug, "season": season, "episode": episode, "qualities": qs,
+            "anilist_id": anilist_id,
+            "episode":    episode,
+            "qualities":  qs,
         })
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
