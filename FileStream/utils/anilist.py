@@ -57,7 +57,6 @@ def _parse_media(media: dict) -> dict:
     title     = _best_title(media["title"])
     cover_img = media.get("coverImage") or {}
     cover_url = cover_img.get("extraLarge") or cover_img.get("large") or ""
-    # Strip HTML from description if any leaked through
     synopsis  = re.sub(r"<[^>]+>", "", media.get("description") or "").strip()
     return {
         "anilist_id":     media["id"],
@@ -66,7 +65,7 @@ def _parse_media(media: dict) -> dict:
         "slug":           make_slug(title),
         "cover_url":      cover_url,
         "banner_url":     media.get("bannerImage") or "",
-        "synopsis":       synopsis[:1000],   # cap at 1000 chars
+        "synopsis":       synopsis[:1000],
         "total_episodes": media.get("episodes"),
         "score":          media.get("averageScore"),
         "genres":         media.get("genres") or [],
@@ -75,17 +74,66 @@ def _parse_media(media: dict) -> dict:
 
 
 async def _query(payload: dict) -> Optional[dict]:
+    """
+    POST a GraphQL query to AniList. Returns the parsed JSON dict or None.
+
+    Guards against:
+      - Network errors / timeouts        → logs warning, returns None
+      - Non-200 HTTP status              → logs warning, returns None
+      - Response body that isn't JSON    → logs warning, returns None
+      - GraphQL-level errors in the body → logs warning, returns None
+        (AniList returns 200 + {"errors": [...]} for bad queries / not-found)
+    """
     try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
                 _URL,
                 json=payload,
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
                 timeout=aiohttp.ClientTimeout(total=12),
-            ) as r:
-                return await r.json()
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning(
+                        "AniList returned HTTP %d for payload %r",
+                        resp.status, payload.get("variables"),
+                    )
+                    return None
+
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception as e:
+                    logger.warning("AniList response is not valid JSON: %s", e)
+                    return None
+
+                if not isinstance(data, dict):
+                    logger.warning("AniList response is not a dict: %r", data)
+                    return None
+
+                # GraphQL errors block — present even on HTTP 200
+                if "errors" in data:
+                    messages = [
+                        e.get("message", "?") for e in (data["errors"] or [])
+                    ]
+                    logger.warning(
+                        "AniList GraphQL errors for %r: %s",
+                        payload.get("variables"), "; ".join(messages),
+                    )
+                    # Still return data — caller can decide if data.data.Media exists
+                    # (AniList sometimes returns both errors AND partial data)
+
+                return data
+
+    except aiohttp.ClientError as e:
+        logger.warning("AniList network error: %s", e)
+        return None
+    except asyncio.TimeoutError:
+        logger.warning("AniList request timed out")
+        return None
     except Exception as e:
-        logger.warning("AniList request failed: %s", e)
+        logger.warning("AniList request failed unexpectedly: %s", e)
         return None
 
 
@@ -94,9 +142,9 @@ async def fetch_anime_by_id(anilist_id: int) -> Optional[dict]:
     data = await _query({"query": _BY_ID, "variables": {"id": anilist_id}})
     if not data:
         return None
-    media = data.get("data", {}).get("Media")
+    media = (data.get("data") or {}).get("Media")
     if not media:
-        logger.warning("AniList id %s not found", anilist_id)
+        logger.warning("AniList id %s not found or returned no Media", anilist_id)
         return None
     return _parse_media(media)
 
@@ -106,8 +154,12 @@ async def search_anime_by_name(name: str) -> Optional[dict]:
     data = await _query({"query": _BY_SEARCH, "variables": {"search": name}})
     if not data:
         return None
-    media = data.get("data", {}).get("Media")
+    media = (data.get("data") or {}).get("Media")
     if not media:
-        logger.warning("AniList search '%s' returned nothing", name)
+        logger.warning("AniList search %r returned no Media", name)
         return None
     return _parse_media(media)
+
+
+# Need asyncio for TimeoutError reference in _query
+import asyncio
