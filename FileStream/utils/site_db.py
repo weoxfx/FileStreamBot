@@ -265,7 +265,8 @@ async def get_episode_qualities(anilist_id: int, episode: int) -> List[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """SELECT e.audio_type, e.quality, e.stream_token, e.file_size
+            """SELECT e.audio_type, e.quality, e.stream_token, e.file_size,
+                      e.dump_msg_id, e.dump_channel_id
                FROM episodes e JOIN anime a ON e.anime_id = a.id
                WHERE a.anilist_id=? AND e.episode=?
                ORDER BY e.audio_type, e.quality""",
@@ -280,7 +281,8 @@ async def get_episode_qualities_by_slug(slug: str, season: int, episode: int) ->
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """SELECT e.audio_type, e.quality, e.stream_token, e.file_size
+            """SELECT e.audio_type, e.quality, e.stream_token, e.file_size,
+                      e.dump_msg_id, e.dump_channel_id
                FROM episodes e JOIN anime a ON e.anime_id = a.id
                WHERE a.slug=? AND e.season=? AND e.episode=?
                ORDER BY e.audio_type, e.quality""",

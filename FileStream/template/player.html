@@ -719,6 +719,20 @@ const CCM = {
     this.cfg.pos   = $('cc-pos').value;
     this._lastStyle=''; // force style re-apply on next render
     emit('ccsettings',{cfg:this.cfg});
+  },
+
+  /* Clear all tracks (used during SPA episode transition) */
+  reset(){
+    this.tracks=[];
+    this.idx=-1;
+    this._lastText=null;
+    this._lastStyle='';
+    const sel=$('cc-track');
+    while(sel.options.length)sel.remove(0);
+    const badge=$('cc-badge'),btn=$('btn-cc');
+    if(badge)badge.textContent='0';
+    if(btn)btn.classList.remove('has-tracks');
+    $('sub-txt').innerHTML='';
   }
 };
 
@@ -786,7 +800,7 @@ class Player {
     this.qualities  = ED.qualities||[];
     this.qIdx       = 0;
     this.skipTimes  = [];
-    this.autoskip   = true;
+    this.autoskip   = false;
     this.autoplay   = false;
     this.skipPad    = 2;
     this.ccOn       = false;
@@ -795,6 +809,7 @@ class Player {
     this._wasPaused = false;
     this._actx=this._gain=this._asrc=null;
     this._skipShown = null;
+    this._autoSkipped = new Set(); // segments already auto-skipped this session
     this._apTimer   = null;
     this._unmuted   = false;
     this._rafPending= false;
@@ -821,6 +836,10 @@ class Player {
       this.ccOn=true;
       $('btn-cc').classList.add('on');
     }
+    // Hard-subbed episodes have subs burned in — hide CC button entirely
+    if(ED.audio_type==='hsub'){
+      $('btn-cc').style.display='none';
+    }
 
     emit('ready',{episode:ED,qualities:this.qualities});
   }
@@ -839,10 +858,13 @@ class Player {
       const sel=$('sel-spd');
       if(sel)sel.value=String(p.speed);
     }
-    // Last-used quality index for this anime (if still valid)
-    if(p.qIdx!=null&&p.qIdx>0&&p.qIdx<this.qualities.length){
-      this.qIdx=p.qIdx;
-      this._loadSrc(p.qIdx,true);
+    // Restore last-used quality by resolution string (persists across episodes)
+    if(p.quality&&this.qualities.length>0){
+      const qi=this.qualities.findIndex(q=>q.quality===p.quality);
+      if(qi>0){
+        this.qIdx=qi;
+        this._loadSrc(qi,true);
+      }
     }
   }
 
@@ -955,7 +977,17 @@ class Player {
         this._skipShown=seg.type;
         $('skip-lbl').textContent=seg.type==='op'?'Skip Intro':'Skip Outro';
         btn.style.display='flex';
-        if(this.autoskip)this._doSkip(seg);
+        // Auto-skip only once per segment per session (won't re-fire on seek back)
+        if(this.autoskip&&!this._autoSkipped.has(seg.type)){
+          this._autoSkipped.add(seg.type);
+          this._doSkip(seg);
+        }
+      }
+      // Show next-episode overlay when entering the outro
+      if(seg.type==='ed'&&ED.next_token&&!$('nxt').classList.contains('show')){
+        $('nxt-info').textContent=`Up next: ${ED.anime_name} Episode ${ED.episode+1}`;
+        $('nxt').classList.add('show');
+        if(this.autoplay)this._startAP(ED.next_token);
       }
     }else{
       this._skipShown=null;
@@ -1103,16 +1135,17 @@ class Player {
 
   _onEnded(){
     const nextToken=ED.next_token;
-    if(nextToken){
-      $('nxt-info').textContent=`${ED.anime_name} · Episode ${ED.episode+1}`;
-    }else{
-      $('nxt-info').textContent='No next episode.';
+    if(!$('nxt').classList.contains('show')){
+      $('nxt-info').textContent=nextToken
+        ?`Up next: ${ED.anime_name} Episode ${ED.episode+1}`
+        :'No next episode.';
+      $('nxt').classList.add('show');
     }
-    $('nxt').classList.add('show');
     if(this.autoplay&&nextToken){
       this._startAP(nextToken);
     }else{
       emit('requestnext',{hasNext:!!nextToken,nextToken});
+      this._postUp({type:'requestnext',hasNext:!!nextToken,nextToken});
     }
   }
 
@@ -1126,11 +1159,54 @@ class Player {
     this._apTimer=setTimeout(()=>{
       bar.style.display='none';
       $('nxt').classList.remove('show');
-      window.location.href=BASE+'/player/'+nextToken;
+      this._goNext(nextToken);
     },5000);
   }
 
   _cancelAP(){clearTimeout(this._apTimer);$('ap-bar').style.display='none';}
+
+  /* SPA navigation — load next episode without leaving fullscreen */
+  async _goNext(nextToken){
+    try{
+      const r=await fetch(BASE+'/api/episode/'+nextToken);
+      if(!r.ok)throw new Error('ep not found');
+      const newED=await r.json();
+      Object.assign(ED,newED);
+      history.pushState({},'',BASE+'/player/'+nextToken);
+      // Reset skip state
+      this._autoSkipped=new Set();
+      this._skipShown=null;
+      this.skipTimes=[];
+      // Reset subtitles
+      CCM.reset();
+      this.ccOn=false;
+      $('btn-cc').classList.remove('on');
+      $('btn-cc').style.display='';
+      if(Array.isArray(ED.subtitles)&&ED.subtitles.length>0){
+        ED.subtitles.forEach(s=>CCM.add(s.label,s.lang,s.url));
+        this.ccOn=true;$('btn-cc').classList.add('on');
+      }
+      if(ED.audio_type==='hsub')$('btn-cc').style.display='none';
+      // Reset qualities & video
+      this.qualities=ED.qualities||[];
+      this.qIdx=0;
+      const savedQ=Cache.prefs().quality;
+      if(savedQ){const qi=this.qualities.findIndex(q=>q.quality===savedQ);if(qi>=0)this.qIdx=qi;}
+      this._buildQ();
+      this._loadSrc(this.qIdx,true);
+      Cache.clearPos();
+      // Fetch new skip times & cover
+      if(ED.mal_id)this._fetchSkip();
+      if(ED.cover_url)Poster.init(ED.cover_url);
+      else if(ED.poster_url)Poster.init(ED.poster_url);
+      emit('ready',{episode:ED,qualities:this.qualities});
+      this._postUp({type:'navigation',token:nextToken,episode:ED.episode,anime:ED.anime_name});
+      this.V.play().catch(()=>{});
+    }catch(_){
+      // Fallback to hard navigation if SPA fetch fails
+      window.location.href=BASE+'/player/'+nextToken;
+    }
+  }
 
   _syncPlay(){
     $('play-ico').setAttribute('d',this.V.paused?'M8 5v14l11-7z':'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
@@ -1275,8 +1351,15 @@ class Player {
 
     $('btn-cc').onclick=e=>{
       e.stopPropagation();
+      // Multiple tracks → open CC selector panel instead of toggling
+      if(CCM.tracks.length>1){
+        const was=$('pnl-cc').classList.contains('open');
+        this._closePanels();
+        if(!was)$('pnl-cc').classList.add('open');
+        return;
+      }
+      // 0 or 1 track → toggle CC on/off
       this.ccOn=!this.ccOn;
-      // Auto-select first available track when CC is turned on
       if(this.ccOn&&CCM.idx<0&&CCM.tracks.length>0)CCM.setActive(0);
       $('btn-cc').classList.toggle('on',this.ccOn);
       if(!this.ccOn){$('sub-txt').innerHTML='';CCM._lastText=null;}
@@ -1337,8 +1420,8 @@ class Player {
       e.stopPropagation();
       this._cancelAP();
       $('nxt').classList.remove('show');
-      if(ED.next_token)window.location.href=BASE+'/player/'+ED.next_token;
-      else emit('requestnext',{hasNext:false});
+      if(ED.next_token)this._goNext(ED.next_token);
+      else{emit('requestnext',{hasNext:false});this._postUp({type:'requestnext',hasNext:false});}
     };
     $('btn-rpl').onclick=e=>{
       e.stopPropagation();
@@ -1467,6 +1550,7 @@ class Player {
         case 'setskiptimes': if(Array.isArray(d.times))this.skipTimes=d.times;break;
         case 'addtrack':     if(d.url)CCM.add(d.label||'Sub',d.lang||'en',d.url);break;
         case 'loadthumbs':   if(d.url)Thumb.load(d.url);break;
+        case 'gotoep':       if(d.token)this._goNext(d.token);break;
         case 'getstate':
           e.source?.postMessage({source:'tsukuyomi-player',type:'state',state:this.getState()},'*');
           break;
@@ -1521,7 +1605,7 @@ class Player {
   setQuality(idx){
     if(idx<0||idx>=this.qualities.length)return;
     this.qIdx=idx;this._loadSrc(idx);
-    Cache.savePrefs({qIdx:idx});
+    Cache.savePrefs({quality:this.qualities[idx].quality});
     toast('Quality: '+this.qualities[idx].quality.toUpperCase());
   }
 
@@ -1579,6 +1663,7 @@ window.Thumb = Thumb;
        case 'unmuted':     // user unmuted
        case 'error':       // e.data.code, message
        case 'requestnext': // e.data.hasNext, nextToken
+       case 'navigation':  // e.data.token, episode, anime — SPA episode change
        case 'state':       // response to getstate message
      }
    });
@@ -1594,6 +1679,7 @@ window.Thumb = Thumb;
    iframe.contentWindow.postMessage({ type: 'setautoplay', value: true }, '*');
    iframe.contentWindow.postMessage({ type: 'addtrack', url: '...', label: 'English', lang: 'en' }, '*');
    iframe.contentWindow.postMessage({ type: 'loadthumbs', url: '...' }, '*');
+   iframe.contentWindow.postMessage({ type: 'gotoep', token: 'abc123' }, '*');
    iframe.contentWindow.postMessage({ type: 'getstate' }, '*');
 
    EMBED example:

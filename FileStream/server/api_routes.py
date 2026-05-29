@@ -6,6 +6,7 @@ Public (no auth):
   GET /stream/{token}
   GET /dl/{token}
   GET /player/{token}?mal_id=XXX
+  GET /api/episode/{token}         — Episode JSON for SPA navigation
   GET /api/aniskip?mal_id=X&episode=Y&episode_length=0
 
 API-key protected (X-API-Key header):
@@ -180,6 +181,86 @@ async def player_handler(request: web.Request):
         episode_json = json.dumps(episode_data),
     )
     return web.Response(text=html, content_type="text/html")
+
+
+@routes.get("/api/episode/{token}", allow_head=True)
+async def episode_by_token_handler(request: web.Request):
+    """
+    Return the same episode-data JSON that the player template receives.
+    Used by the SPA next-episode navigation to reinit the player in-page.
+    """
+    token = request.match_info["token"]
+
+    ep = await site_db.get_episode_by_token(token)
+    if not ep:
+        raise web.HTTPNotFound(text="Stream token not found")
+
+    anilist_id = ep.get("anilist_id")
+    anime_meta = None
+    if anilist_id:
+        anime_meta = await site_db.get_anime_by_anilist_id(anilist_id)
+
+    if anilist_id:
+        qualities = await site_db.get_episode_qualities(anilist_id, ep["episode"])
+    else:
+        qualities = await site_db.get_episode_qualities_by_slug(
+            ep["anime_slug"], ep["season"], ep["episode"]
+        )
+
+    next_token = None
+    try:
+        if anilist_id:
+            all_eps = await site_db.get_episodes_for_anime(anilist_id)
+        else:
+            all_eps = []
+        next_ep_num = ep["episode"] + 1
+        next_candidates = [
+            e for e in all_eps
+            if e["episode"] == next_ep_num and e["audio_type"] == ep["audio_type"]
+        ]
+        if not next_candidates:
+            next_candidates = [e for e in all_eps if e["episode"] == next_ep_num]
+        if next_candidates:
+            next_token = next_candidates[0]["stream_token"]
+    except Exception:
+        pass
+
+    if anilist_id:
+        raw_subs = await site_db.get_subtitles_for_episode(anilist_id, ep["episode"])
+    else:
+        raw_subs = await site_db.get_subtitles_for_episode_by_slug(
+            ep["anime_slug"], ep["season"], ep["episode"]
+        )
+    subtitles = [
+        {"id": s["id"], "label": s["label"], "lang": s["lang"], "url": "/subtitle/" + str(s["id"])}
+        for s in raw_subs
+    ]
+
+    cover_url = (anime_meta or {}).get("cover_url") or None
+    mal_id_db = (anime_meta or {}).get("mal_id")
+    synopsis  = (anime_meta or {}).get("synopsis") or ""
+    mal_id_val = None
+    try:
+        mal_id_val = int(mal_id_db)
+    except (TypeError, ValueError):
+        pass
+
+    return web.json_response({
+        "anime_name":     ep["anime_name"],
+        "slug":           ep["anime_slug"],
+        "anilist_id":     anilist_id,
+        "mal_id":         mal_id_val,
+        "cover_url":      cover_url,
+        "synopsis":       synopsis,
+        "season":         ep["season"],
+        "episode":        ep["episode"],
+        "audio_type":     ep["audio_type"],
+        "qualities":      qualities,
+        "next_token":     next_token,
+        "poster_url":     "/poster/" + token,
+        "thumbnails_url": None,
+        "subtitles":      subtitles,
+    })
 
 
 @routes.get("/poster/{token}", allow_head=True)
