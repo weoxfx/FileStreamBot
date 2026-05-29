@@ -4,6 +4,7 @@ AniList GraphQL API helpers.
 - search_anime_by_name(s) → full metadata dict or None
 """
 import re
+import asyncio
 import logging
 import aiohttp
 
@@ -52,6 +53,36 @@ def make_slug(name: str) -> str:
     name = re.sub(r"\s+", "-", name)
     return name.strip("-")
 
+def _sanitize_search(name: str) -> str:
+    """
+    Clean a name before sending to AniList search.
+    AniList returns HTTP 400 for queries with dashes directly touching words
+    e.g. '-Starting' or 'World-', special chars, or unmatched brackets.
+    """
+    # Drop anything in brackets/parens
+    name = re.sub(r"[\(\[].*?[\)\]]", "", name)
+    # Dashes touching a word on either side → space
+    # e.g. '-Starting' → ' Starting',  'World-' → 'World '
+    name = re.sub(r"(?<!\s)-(?=\w)", " ", name)
+    name = re.sub(r"(?<=\w)-(?=\s|$)", " ", name)
+    # Drop remaining special chars except colon and apostrophe
+    name = re.sub(r"[^\w\s\:\']", " ", name)
+    # Collapse whitespace
+    name = re.sub(r"\s+", " ", name)
+    return name.strip()
+
+
+def _simplify_name(name: str) -> str:
+    """
+    Drop subtitle portions for a shorter fallback search.
+    'Made in Abyss: The Golden City' → 'Made in Abyss'
+    'Sword Art Online: Alicization'  → 'Sword Art Online'
+    """
+    # Drop after ': '
+    name = re.split(r":\s+", name)[0]
+    # Drop after ' - '
+    name = re.split(r"\s+-\s+", name)[0]
+    return name.strip()
 
 def _parse_media(media: dict) -> dict:
     title     = _best_title(media["title"])
@@ -75,14 +106,9 @@ def _parse_media(media: dict) -> dict:
 
 async def _query(payload: dict) -> Optional[dict]:
     """
-    POST a GraphQL query to AniList. Returns the parsed JSON dict or None.
-
-    Guards against:
-      - Network errors / timeouts        → logs warning, returns None
-      - Non-200 HTTP status              → logs warning, returns None
-      - Response body that isn't JSON    → logs warning, returns None
-      - GraphQL-level errors in the body → logs warning, returns None
-        (AniList returns 200 + {"errors": [...]} for bad queries / not-found)
+    POST a GraphQL query to AniList. Returns parsed JSON dict or None.
+    None means a hard failure (network, timeout, bad status, unparseable body).
+    Callers must handle GraphQL-level not-found via data.get("data","").get("Media").
     """
     try:
         async with aiohttp.ClientSession() as session:
@@ -112,21 +138,16 @@ async def _query(payload: dict) -> Optional[dict]:
                     logger.warning("AniList response is not a dict: %r", data)
                     return None
 
-                # GraphQL errors block — present even on HTTP 200
                 if "errors" in data:
-                    messages = [
-                        e.get("message", "?") for e in (data["errors"] or [])
-                    ]
+                    messages = [e.get("message", "?") for e in (data["errors"] or [])]
                     logger.warning(
                         "AniList GraphQL errors for %r: %s",
                         payload.get("variables"), "; ".join(messages),
                     )
-                    # Still return data — caller can decide if data.data.Media exists
-                    # (AniList sometimes returns both errors AND partial data)
 
                 return data
 
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, aiohttp.ServerDisconnectedError) as e:
         logger.warning("AniList network error: %s", e)
         return None
     except asyncio.TimeoutError:
@@ -150,16 +171,34 @@ async def fetch_anime_by_id(anilist_id: int) -> Optional[dict]:
 
 
 async def search_anime_by_name(name: str) -> Optional[dict]:
-    """Search AniList by title. Returns best match or None."""
-    data = await _query({"query": _BY_SEARCH, "variables": {"search": name}})
-    if not data:
-        return None
-    media = (data.get("data") or {}).get("Media")
-    if not media:
-        logger.warning("AniList search %r returned no Media", name)
-        return None
-    return _parse_media(media)
+    """
+    Search AniList by title. Returns best match or None.
 
+    Attempt order:
+      1. Sanitized full name       e.g. "ReZERO Starting Life in Another World"
+      2. Simplified name (no sub)  e.g. "ReZERO"
+    This handles AniList HTTP 400 errors caused by special characters or
+    overly long/complex search strings.
+    """
+    sanitized = _sanitize_search(name)
+    simplified = _simplify_name(sanitized)
 
-# Need asyncio for TimeoutError reference in _query
-import asyncio
+    candidates = [sanitized]
+    if simplified and simplified.lower() != sanitized.lower():
+        candidates.append(simplified)
+
+    for attempt, query_name in enumerate(candidates, 1):
+        logger.debug(
+            "AniList search attempt %d/%d: %r", attempt, len(candidates), query_name
+        )
+        data = await _query({"query": _BY_SEARCH, "variables": {"search": query_name}})
+        if not data:
+            # Hard failure (network/400/timeout) — try next candidate
+            continue
+        media = (data.get("data") or {}).get("Media")
+        if media:
+            return _parse_media(media)
+        logger.warning("AniList search %r returned no Media", query_name)
+
+    logger.warning("All AniList search attempts failed for original name %r", name)
+    return None
