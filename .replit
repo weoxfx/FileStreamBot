@@ -5,7 +5,7 @@ stack = "BEST_EFFORT_FALLBACK"
 
 [nix]
 channel = "stable-25_05"
-packages = ["cacert"]
+packages = ["cacert", "rapidfuzz-cpp", "taskflow"]
 
 [workflows]
 runButton = "Project"

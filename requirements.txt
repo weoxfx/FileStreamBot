@@ -8,3 +8,14 @@ dnspython
 requests
 jinja2
 rapidfuzz
+aiofiles
+aiohttp
+aiosqlite
+dnspython
+jinja2
+pyrofork
+python-dotenv
+rapidfuzz
+requests
+tgcrypto
+python-dotenv
