@@ -819,23 +819,40 @@ class Player {
     }
   }
 
-  /* ── Auto-start (muted) ── */
+  /* ── Auto-start (muted, then auto-unmute if user has done it before) ── */
   _startAutoplay(){
     const V=this.V,bar=$('mute-bar');
+    const hadUnmuted=Cache.prefs().unmuted===true;
+
+    // If user has previously unmuted on this browser, hide the banner upfront
+    if(hadUnmuted)bar.classList.add('gone');
+
     // Load first quality immediately
     this._loadSrc(this.qIdx,true);
 
+    let _played=false;
     const tryPlay=()=>{
+      if(_played)return;
+      _played=true;
       V.play().then(()=>{
-        bar.classList.add('gone');
+        if(hadUnmuted){
+          // Auto-unmute — user has already consented on this browser
+          this._unmuted=false; // allow _unmute() to run
+          this._unmute();
+        }else{
+          // Still muted — keep the banner visible so they know to tap
+          bar.classList.remove('gone');
+        }
       }).catch(()=>{
-        // Already muted autoplay might still fail on some browsers — show banner
+        // Autoplay blocked even muted — show the banner
+        bar.classList.remove('gone');
+        _played=false; // allow retry on interaction
       });
     };
 
     V.addEventListener('loadedmetadata',tryPlay,{once:true});
-    V.addEventListener('canplay',tryPlay,{once:true});
-    setTimeout(tryPlay,300);
+    V.addEventListener('canplay',()=>{if(!_played)tryPlay();},{once:true});
+    setTimeout(()=>{if(!_played)tryPlay();},400);
 
     // Banner click → unmute
     bar.addEventListener('click',()=>this._unmute());
@@ -848,8 +865,9 @@ class Player {
     if(this._unmuted)return;
     this._unmuted=true;
     this.V.muted=false;
-    this.setVol(100);
+    this.setVol(this._volPct||100);
     $('mute-bar').classList.add('gone');
+    Cache.savePrefs({unmuted:true});
     emit('unmuted',{});
   }
 
@@ -985,8 +1003,8 @@ class Player {
     let _spinT;
     const showSpin=()=>{
       clearTimeout(_spinT);
-      // Delay: if canplay fires within 400ms don't flash the spinner
-      _spinT=setTimeout(()=>$('spinner').style.display='flex',400);
+      // Delay: if canplay fires within 200ms don't flash the spinner
+      _spinT=setTimeout(()=>$('spinner').style.display='flex',200);
     };
     const hideSpin=()=>{
       clearTimeout(_spinT);

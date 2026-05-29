@@ -56,7 +56,7 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
         "-i", input_path,
         "-vf", drawtext,
         "-c:v", "libx264",
-        "-crf", "17",
+        "-crf", "23",
         "-preset", "fast",
         "-c:a", "copy",
         "-movflags", "+faststart",
