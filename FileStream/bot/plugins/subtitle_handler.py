@@ -170,11 +170,14 @@ async def _handle_anilist_mode(bot: Client, message: Message):
 
 async def _handle_auto_mode(bot: Client, message: Message, default_audio: str):
     """
-    1. Try to parse caption as "AniList ID | ep | type | quality" — use if valid.
-    2. Fall back to filename template "Show Name - ep - quality.ext".
+    Priority order:
+      1. Caption as AniList ID format  "21355 | 1 | sub | 720p"
+      2. Caption as filename format    "Show Name - 1 - 720p.mkv"
+      3. Actual file_name field        "Show Name - 1 - 720p.mkv"
     """
-    # ── Step 1: caption ──────────────────────────────────────────────────────
     caption_raw = (message.caption or "").strip()
+
+    # ── Step 1: caption as AniList ID format ─────────────────────────────────
     if caption_raw and "|" in caption_raw:
         parsed = parse_caption(caption_raw)
         if parsed:
@@ -188,22 +191,48 @@ async def _handle_auto_mode(bot: Client, message: Message, default_audio: str):
                     bot=bot, message=message, status_msg=status_msg,
                     anime_info=anime_info,
                     episode=parsed["episode"],
-                    audio_type=parsed["audio_type"],   # caption's explicit type wins
+                    audio_type=parsed["audio_type"],  # caption's explicit type wins
                     quality=parsed["quality"],
                 )
                 return
-            # ID found in caption but not on AniList — edit same msg and fall through
             await status_msg.edit_text(
                 f"⚠️ AniList ID <code>{parsed['anilist_id']}</code> not found.\n"
                 "Trying filename…",
                 parse_mode=ParseMode.HTML
             )
-            # Fall through to filename parsing, reusing status_msg
             return await _handle_auto_filename(
                 bot, message, default_audio, status_msg=status_msg
             )
 
-    # ── Step 2: filename (no usable caption) ─────────────────────────────────
+    # ── Step 2: caption as filename format ───────────────────────────────────
+    if caption_raw:
+        fn_parsed = parse_filename(caption_raw)
+        if fn_parsed:
+            status_msg = await message.reply_text(
+                f"🔍 <b>Searching AniList for:</b> <code>{fn_parsed['anime_name']}</code>\n"
+                "<i>(from caption)</i>",
+                parse_mode=ParseMode.HTML, quote=True
+            )
+            anime_info = await search_anime_by_name(fn_parsed["anime_name"])
+            if anime_info:
+                await _do_upload(
+                    bot=bot, message=message, status_msg=status_msg,
+                    anime_info=anime_info,
+                    episode=fn_parsed["episode"],
+                    audio_type=default_audio,
+                    quality=fn_parsed["quality"],
+                )
+                return
+            await status_msg.edit_text(
+                f"⚠️ <b>Could not find on AniList:</b> <code>{fn_parsed['anime_name']}</code>\n"
+                "Trying file's actual name…",
+                parse_mode=ParseMode.HTML
+            )
+            return await _handle_auto_filename(
+                bot, message, default_audio, status_msg=status_msg
+            )
+
+    # ── Step 3: actual file_name field ───────────────────────────────────────
     await _handle_auto_filename(bot, message, default_audio)
 
 
