@@ -478,7 +478,7 @@ async def stream_handler(request: web.Request):
                 headers={"Content-Range": "bytes */{}".format(file_size)},
             )
 
-        chunk_size     = 2 * 1024 * 1024
+        chunk_size     = 1 * 1024 * 1024
         until_bytes    = min(until_bytes, file_size - 1)
         offset         = from_bytes - (from_bytes % chunk_size)
         first_part_cut = from_bytes - offset
