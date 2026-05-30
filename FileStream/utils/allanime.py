@@ -4,6 +4,7 @@ Used by the ani-cli handler to reliably resolve show IDs before
 handing off to the shell download script.
 """
 
+import math
 import logging
 import aiohttp
 from rapidfuzz import fuzz
@@ -48,8 +49,16 @@ async def search_show(
     Search AllAnime for an anime by name.
     Returns a list of dicts: [{id, name, episode_count}], best match first.
 
-    expected_episodes: if provided and > 10, results with far fewer episodes
-    are deprioritised, preventing short spin-offs from beating the main series.
+    Scoring combines:
+    - Exact name match bonus (+100)
+    - Fuzzy token-sort ratio (0–100)
+    - Episode count bonus:
+        * If expected_episodes is known: prefer shows closest to that count (+30 max)
+        * If unknown/ongoing: log-scale bonus so long-running series beat short ones (+30 max)
+
+    This ensures that for long-running shows like One Piece (1163 eps), a short
+    spin-off with a similar name (12 eps) is always ranked below the main series
+    even when AniList doesn't know the total episode count (ongoing shows).
     """
     payload = {
         "variables": {
@@ -103,40 +112,30 @@ async def search_show(
         logger.warning("AllAnime: no results for %r (mode=%s)", name, mode)
         return []
 
-    # If we know roughly how many episodes the show has, filter out results
-    # that are obviously wrong (e.g. a 12-ep spin-off when the main series
-    # has 1000+ eps).  Use a generous 30% floor so we don't discard legit
-    # results for currently-airing shows.
-    if expected_episodes and expected_episodes > 10:
-        floor = int(expected_episodes * 0.3)
-        filtered = [r for r in results if r["episode_count"] >= floor]
-        if filtered:
-            results = filtered
-            logger.debug(
-                "AllAnime: filtered by episode count (floor=%d), %d results left",
-                floor, len(results),
-            )
-        else:
-            logger.debug("AllAnime: episode-count filter would remove all results — skipping filter")
-
-    # Score: exact-match bonus (100) + fuzzy token sort ratio (0-100)
     query_l = name.lower()
 
     def _score(r: dict) -> float:
-        fuzzy  = fuzz.token_sort_ratio(query_l, r["name"].lower())
-        exact  = 100 if r["name"].lower() == query_l else 0
-        return fuzzy + exact
+        fuzzy = fuzz.token_sort_ratio(query_l, r["name"].lower())
+        exact = 100 if r["name"].lower() == query_l else 0
+
+        eps = r["episode_count"]
+        if expected_episodes and expected_episodes > 10:
+            # Known total: prefer shows close to expected count
+            ratio = eps / expected_episodes
+            ep_bonus = max(0.0, 30.0 - abs(ratio - 1.0) * 60.0)
+        else:
+            # Unknown/ongoing: log-scale bonus — 1000 eps ≫ 12 eps
+            ep_bonus = min(30.0, math.log10(eps + 1) * 15.0)
+
+        return fuzzy + exact + ep_bonus
 
     results.sort(key=_score, reverse=True)
 
     logger.info(
-        "AllAnime search %r (mode=%s, expected_eps=%s) → top result: %s (ID: %s, eps: %d)",
-        name,
-        mode,
-        expected_episodes,
-        results[0]["name"],
-        results[0]["id"],
-        results[0]["episode_count"],
+        "AllAnime search %r (mode=%s, expected_eps=%s) → top: %s (ID=%s, eps=%d, score=%.1f)",
+        name, mode, expected_episodes,
+        results[0]["name"], results[0]["id"], results[0]["episode_count"],
+        _score(results[0]),
     )
     return results
 

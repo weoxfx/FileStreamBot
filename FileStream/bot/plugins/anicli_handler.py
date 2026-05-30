@@ -2,12 +2,16 @@
 ani-cli integration — /fetch and /batch commands.
 
 /fetch <anilist_id> <episode> [quality]
-    Fetch a single episode via ani-cli, watermark it, upload to Telegram.
+    Fetch a single episode via ani-cli — automatically generates both
+    SUB and DUB versions in one go (DUB silently skipped if unavailable).
 
 /batch <anilist_id> <start_ep> <end_ep> [quality]
-    Fetch a range of episodes (max 50) sequentially.
+    Fetch a range of episodes (max 50) sequentially, sub+dub each.
 
 Nothing is stored permanently on disk — all downloads use TemporaryDirectory.
+
+Note: AllAnime only serves hardsub (burned-in subtitles) MP4 files.
+There is no true softsub option from this source.
 """
 import os
 import re
@@ -86,20 +90,20 @@ async def _do_one_fetch(
     total_episodes,
     status_msg,
     allanime_id: str = "",
-    sub_type: str = "sub",
+    audio_type: str = "sub",
 ) -> str | None:
     """
     Download one episode via ani-cli, watermark it, upload to dump channel,
     save to DB. Returns the stream_token on success, None on failure.
 
-    sub_type: "sub" (softsub), "hsub" (hardsub), "dub"
+    audio_type: "sub" (Japanese audio + hardsub) or "dub" (English dub)
+    AllAnime only provides hardsub content — there is no real softsub option.
     """
     loop = asyncio.get_event_loop()
     dump_msg_id = None
     file_size   = 0
 
-    # dub uses AllAnime translationType=dub; hsub/sub both use sub translation
-    ani_mode = "dub" if sub_type == "dub" else "sub"
+    ani_mode = "dub" if audio_type == "dub" else "sub"
 
     try:
         with tempfile.TemporaryDirectory(prefix="tsuki_fetch_") as tmpdir:
@@ -108,16 +112,18 @@ async def _do_one_fetch(
             env["ANI_CLI_DOWNLOAD_DIR"] = tmpdir
             env["ANI_CLI_QUALITY"] = quality
             env["ANI_CLI_MODE"] = ani_mode
-            env["ANI_CLI_SUB_TYPE"] = sub_type
-            if sub_type == "dub":
-                env["ANI_CLI_EXTRA_ARGS"] = "--dub"
+            env["ANI_CLI_SUB_TYPE"] = ani_mode
             if allanime_id:
                 env["ANI_CLI_SHOW_ID"] = allanime_id
 
-            cmd = ["bash", _ANICLI_PATH, "-d", "-e", str(episode), anime_name]
-            if sub_type == "dub":
+            if audio_type == "dub":
                 cmd = ["bash", _ANICLI_PATH, "-d", "--dub", "-e", str(episode), anime_name]
-            logger.info("ani-cli cmd: %s (show_id=%s, sub_type=%s)", " ".join(cmd), allanime_id, sub_type)
+            else:
+                cmd = ["bash", _ANICLI_PATH, "-d", "-e", str(episode), anime_name]
+            logger.info(
+                "ani-cli cmd: %s (show_id=%s, audio_type=%s)",
+                " ".join(cmd), allanime_id, audio_type,
+            )
 
             try:
                 proc = await asyncio.wait_for(
@@ -136,7 +142,7 @@ async def _do_one_fetch(
                 )
             except asyncio.TimeoutError:
                 await status_msg.edit_text(
-                    f"❌ <b>E{episode:02d}: ani-cli timed out (30 min).</b>",
+                    f"❌ <b>E{episode:02d} [{audio_type.upper()}]: ani-cli timed out (30 min).</b>",
                     parse_mode=ParseMode.HTML,
                 )
                 return None
@@ -149,7 +155,7 @@ async def _do_one_fetch(
 
             if proc.returncode != 0:
                 await status_msg.edit_text(
-                    f"❌ <b>ani-cli failed for E{episode:02d}.</b>\n\n"
+                    f"❌ <b>ani-cli failed — E{episode:02d} [{audio_type.upper()}].</b>\n\n"
                     f"<code>{stderr_out[-600:]}</code>",
                     parse_mode=ParseMode.HTML,
                 )
@@ -158,14 +164,14 @@ async def _do_one_fetch(
             dl_path = _find_downloaded_file(tmpdir)
             if not dl_path:
                 await status_msg.edit_text(
-                    f"❌ <b>E{episode:02d}: ani-cli ran but no video file was found.</b>\n\n"
+                    f"❌ <b>E{episode:02d} [{audio_type.upper()}]: no video file found after download.</b>\n\n"
                     f"<code>{stdout_out[-300:]}</code>",
                     parse_mode=ParseMode.HTML,
                 )
                 return None
 
             await status_msg.edit_text(
-                f"🎨 <b>Applying watermark — E{episode:02d}…</b>\n"
+                f"🎨 <b>Watermarking E{episode:02d} [{audio_type.upper()}]…</b>\n"
                 f"<b>{anime_name}</b> [{quality}]",
                 parse_mode=ParseMode.HTML,
             )
@@ -175,14 +181,18 @@ async def _do_one_fetch(
             file_size   = os.path.getsize(upload_path)
 
             await status_msg.edit_text(
-                f"⬆️ <b>Uploading E{episode:02d} to dump channel…</b>\n"
+                f"⬆️ <b>Uploading E{episode:02d} [{audio_type.upper()}] to dump channel…</b>\n"
                 f"<b>{anime_name}</b> [{quality}]",
                 parse_mode=ParseMode.HTML,
             )
             dump_caption = (
                 "#{} | E{:02d} | {} | {}\n"
                 "<b>{}</b> (AniList: {}) [ani-cli]"
-            ).format(_safe_hashtag(slug), episode, sub_type.upper(), quality, anime_name, anilist_id)
+            ).format(
+                _safe_hashtag(slug), episode,
+                audio_type.upper(), quality,
+                anime_name, anilist_id,
+            )
 
             sent = await _flood_retry_send(
                 bot=bot,
@@ -202,10 +212,10 @@ async def _do_one_fetch(
             pass
         return None
     except Exception as e:
-        logger.error("ani-cli fetch error E%s: %s", episode, e, exc_info=True)
+        logger.error("ani-cli fetch error E%s [%s]: %s", episode, audio_type, e, exc_info=True)
         try:
             await status_msg.edit_text(
-                f"❌ <b>E{episode:02d} failed:</b> <code>{e}</code>",
+                f"❌ <b>E{episode:02d} [{audio_type.upper()}] failed:</b> <code>{e}</code>",
                 parse_mode=ParseMode.HTML,
             )
         except Exception:
@@ -225,13 +235,32 @@ async def _do_one_fetch(
     return await site_db.upsert_episode(
         anime_id=anime_id,
         episode=episode,
-        audio_type=sub_type,
+        audio_type=audio_type,
         quality=quality,
         dump_msg_id=dump_msg_id,
         dump_channel_id=Telegram.DUMP_CHANNEL,
         file_size=file_size,
         anilist_id=anilist_id,
     )
+
+
+async def _resolve_ids(anime_name: str, total_episodes) -> tuple[str, str]:
+    """
+    Resolve AllAnime show IDs for both sub and dub in parallel.
+    Returns (sub_id, dub_id) — either may be empty string if not found.
+    """
+    sub_task = search_show(anime_name, mode="sub", expected_episodes=total_episodes)
+    dub_task = search_show(anime_name, mode="dub", expected_episodes=total_episodes)
+    sub_results, dub_results = await asyncio.gather(sub_task, dub_task)
+
+    sub_id = sub_results[0]["id"] if sub_results else ""
+    dub_id = dub_results[0]["id"] if dub_results else ""
+
+    logger.info(
+        "AllAnime IDs — %s: sub=%s dub=%s",
+        anime_name, sub_id or "not found", dub_id or "not found",
+    )
+    return sub_id, dub_id
 
 
 # ── /fetch ─────────────────────────────────────────────────────────────────────
@@ -246,12 +275,13 @@ async def fetch_handler(bot: Client, message: Message):
 
     if len(args) < 2:
         await message.reply_text(
-            "❌ <b>Usage:</b> <code>/fetch &lt;anilist_id&gt; &lt;episode&gt; [quality] [sub_type]</code>\n\n"
-            "<b>sub_type:</b> <code>sub</code> (softsub, default) | <code>hsub</code> (hardsub) | <code>dub</code>\n\n"
+            "❌ <b>Usage:</b> <code>/fetch &lt;anilist_id&gt; &lt;episode&gt; [quality]</code>\n\n"
+            "Automatically fetches <b>both SUB and DUB</b> in one go.\n"
+            "DUB is silently skipped if not available on AllAnime.\n\n"
+            "<b>quality:</b> <code>best</code> | <code>1080p</code> (default) | <code>720p</code> | <code>480p</code>\n\n"
             "<b>Examples:</b>\n"
-            "<code>/fetch 21355 1</code>\n"
-            "<code>/fetch 21355 1 1080p hsub</code>\n"
-            "<code>/fetch 21355 1 best dub</code>",
+            "<code>/fetch 21 1</code>\n"
+            "<code>/fetch 21 1 720p</code>",
             parse_mode=ParseMode.HTML,
             quote=True,
         )
@@ -268,13 +298,7 @@ async def fetch_handler(bot: Client, message: Message):
         )
         return
 
-    quality  = "1080p"
-    sub_type = "sub"
-    for arg in args[2:]:
-        if arg in ("sub", "hsub", "dub"):
-            sub_type = arg
-        else:
-            quality = arg
+    quality = args[2] if len(args) >= 3 else "1080p"
 
     if not Telegram.DUMP_CHANNEL:
         await message.reply_text("❌ DUMP_CHANNEL is not configured.", quote=True)
@@ -309,80 +333,105 @@ async def fetch_handler(bot: Client, message: Message):
     cover_url      = anime_info.get("cover_url") or ""
     synopsis       = anime_info.get("synopsis") or ""
     total_episodes = anime_info.get("total_episodes")
+    base           = Server.URL.rstrip("/")
 
-    existing = await site_db.get_episode_qualities(anilist_id, episode)
-    dup = next(
-        (q for q in existing if q["audio_type"] == sub_type and q["quality"] == quality),
+    # Resolve AllAnime IDs for sub and dub in parallel
+    await status_msg.edit_text(
+        f"🔎 <b>Resolving sources for {anime_name}…</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    sub_id, dub_id = await _resolve_ids(anime_name, total_episodes)
+
+    results = {}  # audio_type → stream_token
+
+    # ── SUB ──
+    existing_sub = await site_db.get_episode_qualities(anilist_id, episode)
+    dup_sub = next(
+        (q for q in existing_sub if q["audio_type"] == "sub" and q["quality"] == quality),
         None,
     )
-    if dup:
-        base = Server.URL.rstrip("/")
-        await status_msg.edit_text(
-            "⚠️ <b>Already exists — skipping duplicate.</b>\n\n"
-            f"<b>Anime:</b> {anime_name} <code>({anilist_id})</code>\n"
-            f"<b>Episode:</b> {episode} | <b>Type:</b> {sub_type.upper()} | <b>Quality:</b> {quality}\n\n"
-            f"<b>Player:</b>\n<code>{base}/player/{dup['stream_token']}</code>",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        return
-
-    # Resolve AllAnime show ID in Python (reliable JSON parsing)
-    await status_msg.edit_text(
-        f"🔎 <b>Resolving source for {anime_name}…</b>",
-        parse_mode=ParseMode.HTML,
-    )
-    ani_search_mode = "dub" if sub_type == "dub" else "sub"
-    allanime_results = await search_show(
-        anime_name,
-        mode=ani_search_mode,
-        expected_episodes=total_episodes,
-    )
-    allanime_id = allanime_results[0]["id"] if allanime_results else ""
-    if allanime_id:
-        logger.info("AllAnime resolved: %s → %s (type=%s)", anime_name, allanime_id, sub_type)
+    if dup_sub:
+        logger.info("E%02d SUB already exists — skipping", episode)
+        results["sub"] = dup_sub["stream_token"]
     else:
-        logger.warning("AllAnime: no match for %r — ani-cli will search itself", anime_name)
+        await status_msg.edit_text(
+            f"🌐 <b>Fetching E{episode:02d} [SUB] via ani-cli…</b>\n\n"
+            f"<b>Anime:</b> {anime_name}\n"
+            "<i>This may take several minutes.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        tok = await _do_one_fetch(
+            bot, anilist_id, episode, quality,
+            anime_name, slug, mal_id, cover_url, synopsis, total_episodes,
+            status_msg, allanime_id=sub_id, audio_type="sub",
+        )
+        if tok:
+            results["sub"] = tok
 
-    await status_msg.edit_text(
-        f"🌐 <b>Fetching E{episode:02d} [{sub_type.upper()}] via ani-cli…</b>\n\n"
-        f"<b>Anime:</b> {anime_name}\n"
-        "<i>This may take several minutes depending on source speed.</i>",
-        parse_mode=ParseMode.HTML,
-    )
+    # ── DUB ──
+    if dub_id:
+        existing_dub = await site_db.get_episode_qualities(anilist_id, episode)
+        dup_dub = next(
+            (q for q in existing_dub if q["audio_type"] == "dub" and q["quality"] == quality),
+            None,
+        )
+        if dup_dub:
+            logger.info("E%02d DUB already exists — skipping", episode)
+            results["dub"] = dup_dub["stream_token"]
+        else:
+            await status_msg.edit_text(
+                f"🌐 <b>Fetching E{episode:02d} [DUB] via ani-cli…</b>\n\n"
+                f"<b>Anime:</b> {anime_name}\n"
+                "<i>This may take several minutes.</i>",
+                parse_mode=ParseMode.HTML,
+            )
+            try:
+                tok = await _do_one_fetch(
+                    bot, anilist_id, episode, quality,
+                    anime_name, slug, mal_id, cover_url, synopsis, total_episodes,
+                    status_msg, allanime_id=dub_id, audio_type="dub",
+                )
+                if tok:
+                    results["dub"] = tok
+            except Exception as e:
+                logger.warning("DUB fetch failed for E%02d — skipping: %s", episode, e)
+    else:
+        logger.info("No DUB found on AllAnime for %r — skipping dub", anime_name)
 
-    stream_token = await _do_one_fetch(
-        bot, anilist_id, episode, quality,
-        anime_name, slug, mal_id, cover_url, synopsis, total_episodes,
-        status_msg, allanime_id=allanime_id, sub_type=sub_type,
-    )
-    if not stream_token:
+    if not results:
         return
-
-    base       = Server.URL.rstrip("/")
-    player_url = f"{base}/player/{stream_token}"
 
     if Telegram.ULOG_CHANNEL:
         try:
+            types_done = " + ".join(t.upper() for t in results)
             await bot.send_message(
                 Telegram.ULOG_CHANNEL,
                 "✅ <b>#AniCliFetch</b>\n"
                 f"<b>Anime:</b> {anime_name} <code>({anilist_id})</code>\n"
-                f"<b>Episode:</b> {episode} | <b>Type:</b> {sub_type.upper()} | <b>Quality:</b> {quality}\n"
-                f"<b>Token:</b> <code>{stream_token}</code>",
+                f"<b>Episode:</b> {episode} | <b>Types:</b> {types_done} | <b>Quality:</b> {quality}",
                 parse_mode=ParseMode.HTML,
             )
         except Exception:
             pass
 
     genres_txt = ", ".join(anime_info.get("genres", [])[:3])
+    lines = [
+        "✅ <b>Done! (ani-cli fetch)</b>",
+        "",
+        f"<b>Anime:</b> {anime_name} <code>({anilist_id})</code>",
+    ]
+    if genres_txt:
+        lines.append(f"<b>Genres:</b> {genres_txt}")
+    lines.append(f"<b>Episode:</b> {episode} | <b>Quality:</b> {quality}")
+    lines.append("")
+    for atype, tok in results.items():
+        lines.append(f"<b>{atype.upper()} Player:</b>")
+        lines.append(f"<code>{base}/player/{tok}</code>")
+    if "dub" not in results and not dub_id:
+        lines.append("\n<i>ℹ️ DUB not available on AllAnime for this title.</i>")
+
     await status_msg.edit_text(
-        "✅ <b>Done! (ani-cli fetch)</b>\n\n"
-        f"<b>Anime:</b> {anime_name} <code>({anilist_id})</code>\n"
-        + (f"<b>Genres:</b> {genres_txt}\n" if genres_txt else "")
-        + f"<b>Episode:</b> {episode} | <b>Type:</b> SUB | <b>Quality:</b> {quality}\n\n"
-        f"<b>Token:</b>\n<code>{stream_token}</code>\n\n"
-        f"<b>Player:</b>\n<code>{player_url}</code>",
+        "\n".join(lines),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
@@ -401,13 +450,13 @@ async def batch_handler(bot: Client, message: Message):
     if len(args) < 3:
         await message.reply_text(
             "❌ <b>Usage:</b>\n"
-            "<code>/batch &lt;anilist_id&gt; &lt;start_ep&gt; &lt;end_ep&gt; [quality] [sub_type]</code>\n\n"
-            "<b>sub_type:</b> <code>sub</code> (softsub, default) | <code>hsub</code> (hardsub) | <code>dub</code>\n\n"
+            "<code>/batch &lt;anilist_id&gt; &lt;start_ep&gt; &lt;end_ep&gt; [quality]</code>\n\n"
+            "Fetches each episode as <b>SUB + DUB</b> (DUB skipped if unavailable).\n\n"
+            "<b>quality:</b> <code>best</code> | <code>1080p</code> (default) | <code>720p</code>\n\n"
             "<b>Examples:</b>\n"
-            "<code>/batch 21355 1 12</code>\n"
-            "<code>/batch 21355 1 12 1080p hsub</code>\n"
-            "<code>/batch 21355 1 12 best dub</code>\n\n"
-            "Fetches episodes sequentially via ani-cli (max 50 at a time).",
+            "<code>/batch 21 1 12</code>\n"
+            "<code>/batch 21 1 12 720p</code>\n\n"
+            "Max 50 episodes per batch.",
             parse_mode=ParseMode.HTML,
             quote=True,
         )
@@ -440,14 +489,8 @@ async def batch_handler(bot: Client, message: Message):
         )
         return
 
-    quality  = "1080p"
-    sub_type = "sub"
-    for arg in args[3:]:
-        if arg in ("sub", "hsub", "dub"):
-            sub_type = arg
-        else:
-            quality = arg
-    total = end_ep - start_ep + 1
+    quality = args[3] if len(args) >= 4 else "1080p"
+    total   = end_ep - start_ep + 1
 
     if not Telegram.DUMP_CHANNEL:
         await message.reply_text("❌ DUMP_CHANNEL is not configured.", quote=True)
@@ -483,45 +526,37 @@ async def batch_handler(bot: Client, message: Message):
     total_episodes = anime_info.get("total_episodes")
     base           = Server.URL.rstrip("/")
 
-    # Resolve AllAnime show ID once for the whole batch
+    # Resolve AllAnime IDs for sub and dub once for the whole batch
     await status_msg.edit_text(
-        f"🔎 <b>Resolving source for {anime_name}…</b>",
+        f"🔎 <b>Resolving sources for {anime_name}…</b>",
         parse_mode=ParseMode.HTML,
     )
-    ani_search_mode = "dub" if sub_type == "dub" else "sub"
-    allanime_results = await search_show(
-        anime_name,
-        mode=ani_search_mode,
-        expected_episodes=total_episodes,
-    )
-    allanime_id = allanime_results[0]["id"] if allanime_results else ""
-    if allanime_id:
-        logger.info("AllAnime resolved: %s → %s (type=%s)", anime_name, allanime_id, sub_type)
-    else:
-        logger.warning("AllAnime: no match for %r — ani-cli will search itself", anime_name)
+    sub_id, dub_id = await _resolve_ids(anime_name, total_episodes)
 
-    done_tokens: list[tuple[int, str]] = []
-    skipped:     list[int]             = []
-    failed:      list[int]             = []
+    done_sub:  list[tuple[int, str]] = []
+    done_dub:  list[tuple[int, str]] = []
+    skipped:   list[int]             = []
+    failed:    list[int]             = []
 
-    def _status_line():
+    def _status_line() -> str:
         return (
-            f"<b>Done:</b> {len(done_tokens)} | "
+            f"<b>Done:</b> {len(done_sub)}S/{len(done_dub)}D | "
             f"<b>Skipped:</b> {len(skipped)} | "
             f"<b>Failed:</b> {len(failed)}"
         )
 
     for i, episode in enumerate(range(start_ep, end_ep + 1), 1):
         existing = await site_db.get_episode_qualities(anilist_id, episode)
-        dup = next(
-            (q for q in existing if q["audio_type"] == sub_type and q["quality"] == quality),
-            None,
-        )
-        if dup:
+        has_sub  = any(q["audio_type"] == "sub"  and q["quality"] == quality for q in existing)
+        has_dub  = any(q["audio_type"] == "dub"  and q["quality"] == quality for q in existing)
+        need_sub = not has_sub
+        need_dub = bool(dub_id) and not has_dub
+
+        if not need_sub and not need_dub:
             skipped.append(episode)
             try:
                 await status_msg.edit_text(
-                    f"⏩ <b>Batch {i}/{total} — E{episode:02d} already exists, skipping…</b>\n\n"
+                    f"⏩ <b>Batch {i}/{total} — E{episode:02d} already complete, skipping…</b>\n\n"
                     f"<b>Anime:</b> {anime_name} [{quality}]\n{_status_line()}",
                     parse_mode=ParseMode.HTML,
                 )
@@ -529,24 +564,51 @@ async def batch_handler(bot: Client, message: Message):
                 pass
             continue
 
-        try:
-            await status_msg.edit_text(
-                f"🌐 <b>Batch {i}/{total} — Fetching E{episode:02d}…</b>\n\n"
-                f"<b>Anime:</b> {anime_name} [{quality}]\n{_status_line()}",
-                parse_mode=ParseMode.HTML,
+        ep_ok = False
+
+        # SUB
+        if need_sub:
+            try:
+                await status_msg.edit_text(
+                    f"🌐 <b>Batch {i}/{total} — E{episode:02d} [SUB]…</b>\n\n"
+                    f"<b>Anime:</b> {anime_name} [{quality}]\n{_status_line()}",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+            tok = await _do_one_fetch(
+                bot, anilist_id, episode, quality,
+                anime_name, slug, mal_id, cover_url, synopsis, total_episodes,
+                status_msg, allanime_id=sub_id, audio_type="sub",
             )
-        except Exception:
-            pass
+            if tok:
+                done_sub.append((episode, tok))
+                ep_ok = True
+            else:
+                failed.append(episode)
 
-        stream_token = await _do_one_fetch(
-            bot, anilist_id, episode, quality,
-            anime_name, slug, mal_id, cover_url, synopsis, total_episodes,
-            status_msg, allanime_id=allanime_id, sub_type=sub_type,
-        )
+        # DUB
+        if need_dub:
+            try:
+                await status_msg.edit_text(
+                    f"🌐 <b>Batch {i}/{total} — E{episode:02d} [DUB]…</b>\n\n"
+                    f"<b>Anime:</b> {anime_name} [{quality}]\n{_status_line()}",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
+            try:
+                tok = await _do_one_fetch(
+                    bot, anilist_id, episode, quality,
+                    anime_name, slug, mal_id, cover_url, synopsis, total_episodes,
+                    status_msg, allanime_id=dub_id, audio_type="dub",
+                )
+                if tok:
+                    done_dub.append((episode, tok))
+            except Exception as e:
+                logger.warning("DUB fetch failed for E%02d — skipping: %s", episode, e)
 
-        if stream_token:
-            done_tokens.append((episode, stream_token))
-        else:
+        if not ep_ok and episode not in failed:
             failed.append(episode)
 
     lines = [
@@ -555,12 +617,20 @@ async def batch_handler(bot: Client, message: Message):
         _status_line(),
         "",
     ]
-    if done_tokens:
-        lines.append("<b>Player links:</b>")
-        for ep_num, tok in done_tokens[:8]:
+    if done_sub:
+        lines.append("<b>SUB Player links:</b>")
+        for ep_num, tok in done_sub[:6]:
             lines.append(f"• E{ep_num:02d}: <code>{base}/player/{tok}</code>")
-        if len(done_tokens) > 8:
-            lines.append(f"  … and {len(done_tokens) - 8} more")
+        if len(done_sub) > 6:
+            lines.append(f"  … and {len(done_sub) - 6} more")
+    if done_dub:
+        lines.append("\n<b>DUB Player links:</b>")
+        for ep_num, tok in done_dub[:6]:
+            lines.append(f"• E{ep_num:02d}: <code>{base}/player/{tok}</code>")
+        if len(done_dub) > 6:
+            lines.append(f"  … and {len(done_dub) - 6} more")
+    if not dub_id:
+        lines.append("\n<i>ℹ️ DUB not available on AllAnime for this title.</i>")
     if failed:
         lines.append(f"\n⚠️ <b>Failed:</b> {', '.join(f'E{e:02d}' for e in failed)}")
     if skipped:
