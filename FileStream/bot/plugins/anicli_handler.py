@@ -26,6 +26,7 @@ from FileStream.config import Telegram, Server
 from FileStream.utils.watermark import _run_ffmpeg
 from FileStream.utils import site_db
 from FileStream.utils.anilist import fetch_anime_by_id
+from FileStream.utils.allanime import search_show, get_episodes_list
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ async def _do_one_fetch(
     synopsis: str,
     total_episodes,
     status_msg,
+    allanime_id: str = "",
 ) -> str | None:
     """
     Download one episode via ani-cli, watermark it, upload to dump channel,
@@ -100,9 +102,11 @@ async def _do_one_fetch(
             env["ANI_CLI_DOWNLOAD_DIR"] = tmpdir
             env["ANI_CLI_QUALITY"] = quality
             env["ANI_CLI_MODE"] = "sub"
+            if allanime_id:
+                env["ANI_CLI_SHOW_ID"] = allanime_id
 
             cmd = ["bash", _ANICLI_PATH, "-d", "-e", str(episode), anime_name]
-            logger.info("ani-cli cmd: %s", " ".join(cmd))
+            logger.info("ani-cli cmd: %s (show_id=%s)", " ".join(cmd), allanime_id)
 
             try:
                 proc = await asyncio.wait_for(
@@ -304,6 +308,18 @@ async def fetch_handler(bot: Client, message: Message):
         )
         return
 
+    # Resolve AllAnime show ID in Python (reliable JSON parsing)
+    await status_msg.edit_text(
+        f"🔎 <b>Resolving source for {anime_name}…</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    allanime_results = await search_show(anime_name, mode="sub")
+    allanime_id = allanime_results[0]["id"] if allanime_results else ""
+    if allanime_id:
+        logger.info("AllAnime resolved: %s → %s", anime_name, allanime_id)
+    else:
+        logger.warning("AllAnime: no match for %r — ani-cli will search itself", anime_name)
+
     await status_msg.edit_text(
         f"🌐 <b>Fetching episode {episode} via ani-cli…</b>\n\n"
         f"<b>Anime:</b> {anime_name}\n"
@@ -314,7 +330,7 @@ async def fetch_handler(bot: Client, message: Message):
     stream_token = await _do_one_fetch(
         bot, anilist_id, episode, quality,
         anime_name, slug, mal_id, cover_url, synopsis, total_episodes,
-        status_msg,
+        status_msg, allanime_id=allanime_id,
     )
     if not stream_token:
         return
@@ -433,6 +449,18 @@ async def batch_handler(bot: Client, message: Message):
     total_episodes = anime_info.get("total_episodes")
     base           = Server.URL.rstrip("/")
 
+    # Resolve AllAnime show ID once for the whole batch
+    await status_msg.edit_text(
+        f"🔎 <b>Resolving source for {anime_name}…</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    allanime_results = await search_show(anime_name, mode="sub")
+    allanime_id = allanime_results[0]["id"] if allanime_results else ""
+    if allanime_id:
+        logger.info("AllAnime resolved: %s → %s", anime_name, allanime_id)
+    else:
+        logger.warning("AllAnime: no match for %r — ani-cli will search itself", anime_name)
+
     done_tokens: list[tuple[int, str]] = []
     skipped:     list[int]             = []
     failed:      list[int]             = []
@@ -474,7 +502,7 @@ async def batch_handler(bot: Client, message: Message):
         stream_token = await _do_one_fetch(
             bot, anilist_id, episode, quality,
             anime_name, slug, mal_id, cover_url, synopsis, total_episodes,
-            status_msg,
+            status_msg, allanime_id=allanime_id,
         )
 
         if stream_token:

@@ -258,34 +258,36 @@ done
 # Strip leading/trailing spaces from query
 QUERY="$(printf '%s' "$QUERY" | sed 's/^ //;s/ $//')"
 
-[ -z "$QUERY" ]  && die "No search query provided. Usage: ani-cli -d -e <episode> <anime name>"
-[ -z "$EP_NO" ]  && die "No episode specified. Use -e <episode>."
+[ -z "$EP_NO" ] && die "No episode specified. Use -e <episode>."
 
 dep_check curl sed grep openssl ffmpeg aria2c
 
-# ── Search ─────────────────────────────────────────────────────────────────────
+# ── Search (skipped when ANI_CLI_SHOW_ID is pre-resolved by the bot) ───────────
 
-log "Searching: ${QUERY}"
-# search_anime outputs lines of format: ID|Title (N episodes)
-RESULTS="$(search_anime "$QUERY")"
-[ -z "$RESULTS" ] && die "No results found for: ${QUERY}"
+if [ -n "${ANI_CLI_SHOW_ID:-}" ]; then
+    SHOW_ID="$ANI_CLI_SHOW_ID"
+    SHOW_TITLE="${QUERY:-unknown}"
+    log "Using pre-resolved show ID: ${SHOW_ID}"
+else
+    [ -z "$QUERY" ] && die "No search query provided. Usage: ani-cli -d -e <episode> <anime name>"
+    log "Searching: ${QUERY}"
+    RESULTS="$(search_anime "$QUERY")"
+    [ -z "$RESULTS" ] && die "No results found for: ${QUERY}"
 
-log "Results:"
-printf '%s\n' "$RESULTS" | head -5 | while IFS='|' read -r rid rname; do
-    log "  ${rid} -> ${rname}"
-done >&2
+    log "Results:"
+    printf '%s\n' "$RESULTS" | head -5 | while IFS='|' read -r rid rname; do
+        log "  ${rid} -> ${rname}"
+    done
 
-# Pick the Nth result
-SHOW_LINE="$(printf '%s\n' "$RESULTS" | sed -n "${SELECT_NTH}p")"
-[ -z "$SHOW_LINE" ] && SHOW_LINE="$(printf '%s\n' "$RESULTS" | head -1)"
-[ -z "$SHOW_LINE" ] && die "Could not select a result."
+    SHOW_LINE="$(printf '%s\n' "$RESULTS" | sed -n "${SELECT_NTH}p")"
+    [ -z "$SHOW_LINE" ] && SHOW_LINE="$(printf '%s\n' "$RESULTS" | head -1)"
+    [ -z "$SHOW_LINE" ] && die "Could not select a result."
 
-SHOW_ID="$(printf '%s' "$SHOW_LINE" | cut -d'|' -f1)"
-SHOW_TITLE="$(printf '%s' "$SHOW_LINE" | cut -d'|' -f2)"
-
-[ -z "$SHOW_ID" ] && die "Failed to extract show ID from: ${SHOW_LINE}"
-
-log "Selected [${SELECT_NTH}]: ${SHOW_TITLE} (ID: ${SHOW_ID})"
+    SHOW_ID="$(printf '%s' "$SHOW_LINE" | cut -d'|' -f1)"
+    SHOW_TITLE="$(printf '%s' "$SHOW_LINE" | cut -d'|' -f2)"
+    [ -z "$SHOW_ID" ] && die "Failed to extract show ID from: ${SHOW_LINE}"
+    log "Selected [${SELECT_NTH}]: ${SHOW_TITLE} (ID: ${SHOW_ID})"
+fi
 
 # ── Episode list ───────────────────────────────────────────────────────────────
 
