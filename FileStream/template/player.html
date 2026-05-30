@@ -189,7 +189,7 @@ video{position:absolute;inset:0;width:100%;height:100%;
 #sp-img{width:152px;height:86px;background:#111 center/cover no-repeat;
   border:2px solid var(--gold);border-radius:6px;overflow:hidden;
   box-shadow:0 4px 20px rgba(0,0,0,.6)}
-#sp-img.no-th{background-image:none!important;background-color:#1a1500}
+#sp-img.no-th{display:none}
 #sp-t{font-size:11px;color:#fff;background:rgba(0,0,0,.85);padding:2px 8px;border-radius:4px}
 
 /* Buttons row */
@@ -213,9 +213,11 @@ video{position:absolute;inset:0;width:100%;height:100%;
 
 /* Volume */
 #vol-wrap{display:flex;align-items:center;gap:4px;flex-shrink:0}
-#vol-sl{-webkit-appearance:none;width:72px;height:4px;border-radius:4px;
+#vol-sl{-webkit-appearance:none;width:0;max-width:72px;height:4px;border-radius:4px;
   background:linear-gradient(to right,var(--gold) var(--p,50%),rgba(255,255,255,.14) var(--p,50%));
-  outline:none;cursor:pointer}
+  outline:none;cursor:pointer;opacity:0;pointer-events:none;
+  transition:width .2s ease,opacity .2s ease;overflow:hidden}
+#vol-wrap:hover #vol-sl,#vol-wrap:focus-within #vol-sl{width:72px;opacity:1;pointer-events:all}
 #vol-sl::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;
   border-radius:50%;background:var(--gold2);box-shadow:0 0 4px var(--gold)}
 
@@ -309,6 +311,7 @@ video{position:absolute;inset:0;width:100%;height:100%;
   text-shadow:0 2px 6px rgba(0,0,0,1),0 0 14px rgba(0,0,0,.8);
   letter-spacing:.01em;
   box-decoration-break:clone;-webkit-box-decoration-break:clone}
+#sub-txt:empty{display:none}
 
 /* Mobile */
 @media(max-width:640px),(pointer:coarse){
@@ -319,7 +322,7 @@ video{position:absolute;inset:0;width:100%;height:100%;
   .cb{width:40px;height:40px}
   .cb svg{width:22px;height:22px}
   .cb::after{display:none}
-  #vol-sl{width:56px}
+  #vol-wrap:hover #vol-sl,#vol-wrap:focus-within #vol-sl{width:56px}
   #ep-hud{padding:8px 10px 26px}
   .hud-name{font-size:13px}
   #sub-box{bottom:80px}
@@ -850,7 +853,7 @@ class Player {
     // Volume
     if(p.volume!=null)this.setVol(p.volume);
     // Toggles
-    if(p.autoskip!=null)this.setAutoskip(p.autoskip);
+    if(p.skip_auto!=null)this.setAutoskip(p.skip_auto);
     if(p.autoplay!=null)this.setAutoplay(p.autoplay);
     // Playback speed
     if(p.speed!=null&&p.speed>0){
@@ -1234,8 +1237,9 @@ class Player {
       const t=p*(this.V.duration||0);
       ptim.textContent=fmt(t);
       Thumb.apply(t,pimg);
-      const r=sb.getBoundingClientRect();
-      const x=Math.max(76,Math.min(r.width-76,clientX-r.left));
+      const r=sw.getBoundingClientRect();
+      const half=pimg.classList.contains('no-th')?36:76;
+      const x=Math.max(half,Math.min(r.width-half,clientX-r.left));
       prev.style.left=x+'px';
       prev.classList.add('show');
     };
@@ -1609,7 +1613,7 @@ class Player {
     toast('Quality: '+this.qualities[idx].quality.toUpperCase());
   }
 
-  setAutoskip(v){this.autoskip=!!v;$('tog-skip').className='tog'+(v?' on':'');Cache.savePrefs({autoskip:!!v});}
+  setAutoskip(v){this.autoskip=!!v;$('tog-skip').className='tog'+(v?' on':'');Cache.savePrefs({skip_auto:!!v});}
   setAutoplay(v){this.autoplay=!!v;$('tog-ap').className='tog'+(v?' on':'');Cache.savePrefs({autoplay:!!v});}
 
   addSubtitleTrack(url,lang='en',label='Subtitle'){return CCM.add(label,lang,url);}
@@ -1629,7 +1633,7 @@ class Player {
       currentTime:this.V.currentTime,duration:this.V.duration,
       paused:this.V.paused,volume:this._volPct,muted:this.V.muted,
       qIndex:this.qIdx,quality:this.qualities[this.qIdx],
-      autoskip:this.autoskip,autoplay:this.autoplay,
+      skip_auto:this.autoskip,autoplay:this.autoplay,
       skipTimes:this.skipTimes,ccOn:this.ccOn,
       watchedSeconds:WatchTime.total(),
     };

@@ -652,6 +652,7 @@ def _run_hardsub_ffmpeg(video_path: str, sub_path: str, output_path: str) -> boo
         "-crf", "23",
         "-preset", "fast",
         "-c:a", "copy",
+        "-sn",
         "-movflags", "+faststart",
         output_path,
     ]
