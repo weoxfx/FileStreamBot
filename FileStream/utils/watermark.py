@@ -228,6 +228,64 @@ def run_watermark_with_hardsub(input_path: str, sub_path: str, output_path: str)
     return False
 
 
+def run_watermark_with_muxed_sub(input_path: str, sub_path: str, output_path: str) -> bool:
+    """
+    Watermark the video AND mux an external subtitle file as a soft subtitle track (SUB).
+    The output is an MP4 with the Tsukuyomi watermark and the subtitle muxed in as mov_text.
+    Falls back to plain watermark if subtitle muxing fails (subtitle still served via API).
+    Returns True when output_path is ready to upload.
+    """
+    if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+        logger.error("Input file missing or empty: %s", input_path)
+        return False
+    if not os.path.exists(sub_path) or os.path.getsize(sub_path) == 0:
+        logger.error("Subtitle file missing or empty: %s", sub_path)
+        return False
+
+    drawtext = _build_drawtext()
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-i", sub_path,
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-map", "1:0",
+        "-vf", drawtext,
+        "-c:v", "libx264",
+        "-crf", "23",
+        "-preset", "fast",
+        "-c:a", "copy",
+        "-c:s", "mov_text",
+        "-movflags", "+faststart",
+        "-metadata", "title=Tsukuyomi",
+        output_path,
+    ]
+    logger.info("ffmpeg watermark+muxed-sub: %s + %s", input_path, sub_path)
+    try:
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=7200)
+        if r.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info("Watermark+muxed-sub encode succeeded")
+            return True
+        logger.warning(
+            "Watermark+muxed-sub failed (rc=%d), falling back to plain watermark:\n%s",
+            r.returncode, r.stderr.decode(errors="replace")[-400:],
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("ffmpeg watermark+muxed-sub timed out")
+    except FileNotFoundError:
+        logger.error("ffmpeg not found on PATH")
+        return False
+
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+
+    return _run_ffmpeg(input_path, output_path)
+
+
 async def apply_watermark_and_upload(
     bot_client,
     original_file_id: str,

@@ -25,7 +25,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from FileStream.bot import FileStream
 from FileStream.config import Telegram, Server
 from FileStream.utils.caption_parser import parse_caption, parse_filename
-from FileStream.utils.watermark import _run_ffmpeg, run_watermark_with_softsub, run_watermark_with_hardsub
+from FileStream.utils.watermark import _run_ffmpeg, run_watermark_with_softsub, run_watermark_with_hardsub, run_watermark_with_muxed_sub
 from FileStream.utils import bot_db, site_db
 from FileStream.utils.anilist import fetch_anime_by_id, search_anime_by_name
 from FileStream.utils.human_readable import humanbytes
@@ -855,10 +855,13 @@ async def _process_subtitle_upload(bot: Client, message: Message):
     Example:        21355 | 1 | English | en
 
     Flow:
-      1. Store subtitle file_id in DB (soft sub — available to all episode variants).
-      2. Download the episode's source video + the subtitle file.
-      3. Burn the subtitle into the video → upload as audio_type='hsub'.
-    All files processed in a TemporaryDirectory — nothing persists on VPS.
+      1. Store subtitle file_id in DB (soft sub — available to all episode variants via API).
+      2. Download the episode's source video + the subtitle file (both via Telegram).
+      3. Produce TWO versions from the source video:
+           a. HSUB — subtitle burned into picture (hardsub) → audio_type='hsub'
+           b. SUB  — subtitle muxed as a soft track (softsub) → audio_type='sub'
+      4. Upload both to dump channel, register both tokens, report both links.
+    All files processed in a TemporaryDirectory — nothing persists on VPS/disk.
     """
     caption_raw = (message.caption or "").strip()
     parsed = _parse_sub_caption(caption_raw) if caption_raw else None
@@ -895,7 +898,7 @@ async def _process_subtitle_upload(bot: Client, message: Message):
     anime_name = anime_meta["name"]
     slug       = anime_meta["slug"]
 
-    # ── Store soft subtitle in DB ────────────────────────────────────────────
+    # ── Store soft subtitle in DB (serves via /subtitle/{id} API) ────────────
     file_id = message.document.file_id
     await site_db.upsert_subtitle(
         anime_id=anime_id, episode=episode, label=label, lang=lang, file_id=file_id
@@ -907,14 +910,16 @@ async def _process_subtitle_upload(bot: Client, message: Message):
         "✅ <b>Soft subtitle saved.</b>\n\n"
         f"<b>Anime:</b> {anime_name} <code>({anilist_id})</code>\n"
         f"<b>Episode:</b> {episode} | <b>Lang:</b> {label} ({lang})\n\n"
-        "🎞️ <b>Creating hard-subbed video…</b> (this takes a while)",
+        "🎞️ <b>Creating 2 versions (HSUB + SUB)…</b> (this takes a while)",
         parse_mode=ParseMode.HTML
     )
 
-    # ── Find a source episode ─────────────────────────────────────────────────
+    # ── Find a source episode (prefer dub/plain over hsub) ───────────────────
     all_eps = await site_db.get_episode_qualities(anilist_id, episode)
     source_ep = next(
-        (e for e in all_eps if e["audio_type"] == "sub"), None
+        (e for e in all_eps if e["audio_type"] == "dub"), None
+    ) or next(
+        (e for e in all_eps if e["audio_type"] not in ("hsub", "sub")), None
     ) or next(
         (e for e in all_eps if e["audio_type"] not in ("hsub",)), None
     )
@@ -924,23 +929,25 @@ async def _process_subtitle_upload(bot: Client, message: Message):
             "✅ <b>Soft subtitle saved.</b>\n\n"
             f"<b>Anime:</b> {anime_name} <code>({anilist_id})</code>\n"
             f"<b>Episode:</b> {episode} | <b>Lang:</b> {label} ({lang})\n\n"
-            "⚠️ <b>No source video found</b> — hard-sub skipped.\n"
+            "⚠️ <b>No source video found</b> — HSUB/SUB encoding skipped.\n"
             "Upload the video first, then re-attach the subtitle.",
             parse_mode=ParseMode.HTML
         )
         return
 
-    # ── Download video + subtitle, encode hard-sub ────────────────────────────
+    # ── Download source video + subtitle, then encode both versions ───────────
     loop = asyncio.get_event_loop()
     quality         = source_ep["quality"]
     dump_channel_id = source_ep.get("dump_channel_id") or Telegram.DUMP_CHANNEL
 
     hs_dump_msg_id = None
     hs_file_size   = 0
+    ss_dump_msg_id = None
+    ss_file_size   = 0
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            # All temp files live inside tmpdir — auto-cleaned on exit
+            # ── Fetch source video from dump channel ─────────────────────────
             try:
                 src_msg = await bot.get_messages(dump_channel_id, source_ep["dump_msg_id"])
                 video_media = getattr(src_msg, "video", None) or getattr(src_msg, "document", None)
@@ -951,7 +958,8 @@ async def _process_subtitle_upload(bot: Client, message: Message):
                 raise RuntimeError(f"Could not fetch dump channel message: {e}")
 
             await status_msg.edit_text(
-                "⬇️ <b>Downloading source video…</b>", parse_mode=ParseMode.HTML
+                "⬇️ <b>[1/5] Downloading source video from Telegram…</b>",
+                parse_mode=ParseMode.HTML
             )
             video_path = os.path.join(tmpdir, "source.mp4")
             dl = await bot.download_media(video_file_id, file_name=video_path)
@@ -964,35 +972,69 @@ async def _process_subtitle_upload(bot: Client, message: Message):
             if not sub_dl or not os.path.exists(sub_dl):
                 raise RuntimeError("Subtitle download returned no file")
 
-            # ── Hard-sub encode ──────────────────────────────────────────────
+            # ── [1] HSUB — burn subtitle into picture ─────────────────────────
             await status_msg.edit_text(
-                "🔥 <b>Burning subtitles into video (HSUB)…</b>",
+                "🔥 <b>[2/5] Burning subtitles into video (HSUB)…</b>\n\n"
+                f"<b>{anime_name}</b> E{episode:02d} [HSUB] [{quality}]",
                 parse_mode=ParseMode.HTML
             )
             hs_path = os.path.join(tmpdir, "hardsub.mp4")
-            hs_ok = await loop.run_in_executor(None, _run_hardsub_ffmpeg, dl, sub_dl, hs_path)
-            if not hs_ok:
-                raise RuntimeError("Hard-sub ffmpeg encode failed")
+            hs_ok = await loop.run_in_executor(
+                None, _run_hardsub_ffmpeg, dl, sub_dl, hs_path
+            )
 
-            # ── Upload hard-sub ──────────────────────────────────────────────
+            if hs_ok:
+                await status_msg.edit_text(
+                    "⬆️ <b>[3/5] Uploading hard-subbed video (HSUB)…</b>",
+                    parse_mode=ParseMode.HTML
+                )
+                hs_caption = "#{} | E{:02d} | HSUB | {}\n<b>{}</b> (AniList: {})".format(
+                    _safe_hashtag(slug), episode, quality, anime_name, anilist_id
+                )
+                hs_sent = await _send_with_flood_retry(
+                    bot=bot,
+                    chat_id=Telegram.DUMP_CHANNEL,
+                    video=hs_path,
+                    caption=hs_caption,
+                    status_msg=status_msg,
+                )
+                if hs_sent is not None:
+                    hs_dump_msg_id = hs_sent.id
+                    hs_file_size   = os.path.getsize(hs_path)
+            else:
+                logger.warning("HSUB encode failed — skipping HSUB")
+
+            # ── [2] SUB — mux subtitle as soft track ──────────────────────────
             await status_msg.edit_text(
-                "⬆️ <b>Uploading hard-subbed video (HSUB)…</b>",
+                "💬 <b>[4/5] Muxing subtitle as soft track (SUB)…</b>\n\n"
+                f"<b>{anime_name}</b> E{episode:02d} [SUB] [{quality}]",
                 parse_mode=ParseMode.HTML
             )
-            hs_caption = "#{} | E{:02d} | HSUB | {}\n<b>{}</b> (AniList: {})".format(
-                _safe_hashtag(slug), episode, quality, anime_name, anilist_id
+            ss_path = os.path.join(tmpdir, "softsub.mp4")
+            ss_ok = await loop.run_in_executor(
+                None, run_watermark_with_muxed_sub, dl, sub_dl, ss_path
             )
-            hs_sent = await _send_with_flood_retry(
-                bot=bot,
-                chat_id=Telegram.DUMP_CHANNEL,
-                video=hs_path,
-                caption=hs_caption,
-                status_msg=status_msg,
-            )
-            if hs_sent is None:
-                return
-            hs_dump_msg_id = hs_sent.id
-            hs_file_size   = os.path.getsize(hs_path)
+
+            if ss_ok:
+                await status_msg.edit_text(
+                    "⬆️ <b>[5/5] Uploading soft-subbed video (SUB)…</b>",
+                    parse_mode=ParseMode.HTML
+                )
+                ss_caption = "#{} | E{:02d} | SUB | {}\n<b>{}</b> (AniList: {})".format(
+                    _safe_hashtag(slug), episode, quality, anime_name, anilist_id
+                )
+                ss_sent = await _send_with_flood_retry(
+                    bot=bot,
+                    chat_id=Telegram.DUMP_CHANNEL,
+                    video=ss_path,
+                    caption=ss_caption,
+                    status_msg=status_msg,
+                )
+                if ss_sent is not None:
+                    ss_dump_msg_id = ss_sent.id
+                    ss_file_size   = os.path.getsize(ss_path)
+            else:
+                logger.warning("SUB softsub encode failed — skipping SUB")
 
     except asyncio.CancelledError:
         try:
@@ -1011,7 +1053,7 @@ async def _process_subtitle_upload(bot: Client, message: Message):
         )
         return
 
-    # ── Save HSUB episode to DB ───────────────────────────────────────────────
+    # ── Save both episodes to DB ──────────────────────────────────────────────
     hs_token = None
     if hs_dump_msg_id:
         hs_token = await site_db.upsert_episode(
@@ -1025,19 +1067,67 @@ async def _process_subtitle_upload(bot: Client, message: Message):
             anilist_id=anilist_id,
         )
 
+    ss_token = None
+    if ss_dump_msg_id:
+        ss_token = await site_db.upsert_episode(
+            anime_id=anime_id,
+            episode=episode,
+            audio_type="sub",
+            quality=quality,
+            dump_msg_id=ss_dump_msg_id,
+            dump_channel_id=Telegram.DUMP_CHANNEL,
+            file_size=ss_file_size,
+            anilist_id=anilist_id,
+        )
+
+    # ── Notify ULOG channel ───────────────────────────────────────────────────
+    if Telegram.ULOG_CHANNEL and (hs_token or ss_token):
+        try:
+            ulog_lines = [
+                "✅ <b>#SubtitleUpload</b>",
+                f"<b>Anime:</b> {anime_name} <code>({anilist_id})</code>",
+                f"<b>Episode:</b> {episode} | <b>Sub:</b> {label} ({lang})",
+            ]
+            if ss_token:
+                ulog_lines.append(f"💬 <b>SUB token:</b> <code>{ss_token}</code>")
+            if hs_token:
+                ulog_lines.append(f"🔥 <b>HSUB token:</b> <code>{hs_token}</code>")
+            await bot.send_message(
+                Telegram.ULOG_CHANNEL,
+                "\n".join(ulog_lines),
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+
     # ── Build result message ──────────────────────────────────────────────────
     lines = [
-        "✅ <b>Done!</b>\n",
+        "✅ <b>Done! (2 versions created from subtitle)</b>\n",
         f"<b>Anime:</b> {anime_name} <code>({anilist_id})</code>",
-        f"<b>Episode:</b> {episode} | <b>Sub:</b> {label} ({lang})\n",
-        "📌 <b>Soft sub</b> → attached to all episode variants for this ep",
+        f"<b>Episode:</b> {episode} | <b>Sub:</b> {label} ({lang})",
+        f"<b>Quality:</b> {quality}\n",
+        "📌 <b>Soft sub</b> → saved to DB, available on all episode variants",
     ]
-    if hs_token:
+
+    if ss_token:
+        ss_player = f"{base}/player/{ss_token}"
         lines.append(
-            "🔥 <b>HSUB</b> (burned-in) token:\n"
-            f"<code>{hs_token}</code>\n"
-            f"Player: <code>{base}/player/{hs_token}</code>"
+            "\n💬 <b>SUB</b> (subtitle muxed as soft track):\n"
+            f"Token: <code>{ss_token}</code>\n"
+            f"Player: <code>{ss_player}</code>"
         )
+    else:
+        lines.append("\n⚠️ <b>SUB</b> encode failed — skipped")
+
+    if hs_token:
+        hs_player = f"{base}/player/{hs_token}"
+        lines.append(
+            "\n🔥 <b>HSUB</b> (subtitles burned into picture):\n"
+            f"Token: <code>{hs_token}</code>\n"
+            f"Player: <code>{hs_player}</code>"
+        )
+    else:
+        lines.append("\n⚠️ <b>HSUB</b> encode failed — skipped")
 
     await status_msg.edit_text(
         "\n".join(lines),

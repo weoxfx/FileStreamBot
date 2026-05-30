@@ -817,7 +817,7 @@ async def upload_file_handler(request: web.Request):
             _, client = _pick_client()
             _last_t = [0.0]
 
-            def _progress(current, total):
+            async def _progress(current, total):
                 now = time.time()
                 if now - _last_t[0] < 1.5:
                     return
