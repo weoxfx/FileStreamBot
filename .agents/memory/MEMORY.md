@@ -1,1 +1,0 @@
-- [Telegram upload.GetFile chunk limit](telegram-chunk-limit.md) — chunk_size must be ≤1MB (1048576) and a multiple of 4096; 2MB causes LIMIT_INVALID
