@@ -561,15 +561,15 @@ async def search_anime_by_name(name: str) -> Optional[dict]:
             return _parse_media(best)
 
     # ── Kitsu fallback ────────────────────────────────────────────────────────
-    if anilist_failed or True:  # also try Kitsu if AniList returned nothing useful
-        logger.info("Trying Kitsu fallback for %r", name)
-        kitsu_result = await _kitsu_search(sanitized)
+    # Only reach here if all AniList attempts returned nothing
+    logger.info("Trying Kitsu fallback for %r", name)
+    kitsu_result = await _kitsu_search(sanitized)
+    if kitsu_result:
+        return kitsu_result
+    if simplified and simplified.lower() != sanitized.lower():
+        kitsu_result = await _kitsu_search(simplified)
         if kitsu_result:
             return kitsu_result
-        if simplified and simplified.lower() != sanitized.lower():
-            kitsu_result = await _kitsu_search(simplified)
-            if kitsu_result:
-                return kitsu_result
 
     logger.warning("All AniList + Kitsu search attempts failed for %r", name)
     return None

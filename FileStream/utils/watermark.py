@@ -2,8 +2,13 @@
 ffmpeg watermark pipeline — burns a visible "Tsukuyomi" text watermark
 into the top-right corner of every video.
 
-Quality: libx264 CRF 17 (near-lossless). Audio: stream copy.
+Quality: libx264 CRF 23 (fast). Audio: stream copy.
 Falls back to stream-copy (no watermark) if libx264/drawtext unavailable.
+
+Public API:
+  _run_ffmpeg(input_path, output_path)                  — plain watermark
+  run_watermark_with_softsub(input_path, output_path)   — watermark + preserve subtitle tracks
+  run_watermark_with_hardsub(input_path, sub_path, output_path) — watermark + burn-in subtitle
 """
 import os
 import logging
@@ -14,34 +19,23 @@ from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
+_FONT_CANDIDATES = [
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "fonts", "watermark.ttf"),
+    "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+]
 
-def _run_ffmpeg(input_path: str, output_path: str) -> bool:
-    """
-    Try watermark encode first, then stream-copy fallback.
-    Returns True when output_path is ready to upload.
-    """
-    # ── Step 1: probe file duration so ffmpeg doesn't hang ──────────────────
-    # Simple sanity check that the file is readable
-    if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
-        logger.error("Input file missing or empty: %s", input_path)
-        return False
 
-    # ── Step 2: watermark with drawtext ─────────────────────────────────────
-    # Prefer bundled Rajdhani Bold font; fall back to common system fonts
-    _font_candidates = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "fonts", "watermark.ttf"),
-        "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-    ]
-    _font_path = next((p for p in _font_candidates if os.path.exists(p)), None)
-    _fontfile  = f"fontfile={_font_path}:" if _font_path else ""
-
-    drawtext = (
+def _build_drawtext() -> str:
+    """Return the ffmpeg drawtext filter string for the Tsukuyomi watermark."""
+    font_path = next((p for p in _FONT_CANDIDATES if os.path.exists(p)), None)
+    fontfile  = f"fontfile={font_path}:" if font_path else ""
+    return (
         "drawtext="
         "text='Tsukuyomi':"
-        f"{_fontfile}"
+        f"{fontfile}"
         "fontsize=16:"
         "fontcolor=white@0.35:"
         "shadowcolor=black@0.50:"
@@ -50,6 +44,19 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
         "x=w-tw-20:"
         "y=18"
     )
+
+
+def _run_ffmpeg(input_path: str, output_path: str) -> bool:
+    """
+    Apply Tsukuyomi watermark.
+    Try watermark encode first, then stream-copy fallback.
+    Returns True when output_path is ready to upload.
+    """
+    if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+        logger.error("Input file missing or empty: %s", input_path)
+        return False
+
+    drawtext = _build_drawtext()
 
     wm_cmd = [
         "ffmpeg", "-y",
@@ -66,19 +73,13 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
 
     logger.info("ffmpeg watermark encode: %s", input_path)
     try:
-        r = subprocess.run(
-            wm_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=7200,
-        )
+        r = subprocess.run(wm_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=7200)
         if r.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             logger.info("Watermark encode succeeded")
             return True
         logger.warning(
             "Watermark encode failed (rc=%d), stderr tail:\n%s",
-            r.returncode,
-            r.stderr.decode(errors="replace")[-800:],
+            r.returncode, r.stderr.decode(errors="replace")[-800:],
         )
     except subprocess.TimeoutExpired:
         logger.error("ffmpeg watermark timed out")
@@ -86,9 +87,8 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
         logger.error("ffmpeg not found on PATH")
         return False
 
-    # ── Step 3: stream-copy fallback (no watermark, no quality loss) ────────
+    # Stream-copy fallback (no watermark, no quality loss)
     logger.info("Falling back to stream-copy remux")
-    # Clean up any partial output from failed encode
     if os.path.exists(output_path):
         try:
             os.remove(output_path)
@@ -104,19 +104,13 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
         output_path,
     ]
     try:
-        r2 = subprocess.run(
-            cp_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=7200,
-        )
+        r2 = subprocess.run(cp_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=7200)
         if r2.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            logger.info("Stream-copy fallback succeeded (no visible watermark)")
+            logger.info("Stream-copy fallback succeeded")
             return True
         logger.error(
             "Stream-copy also failed (rc=%d):\n%s",
-            r2.returncode,
-            r2.stderr.decode(errors="replace")[-800:],
+            r2.returncode, r2.stderr.decode(errors="replace")[-800:],
         )
         return False
     except subprocess.TimeoutExpired:
@@ -125,6 +119,113 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
     except FileNotFoundError:
         logger.error("ffmpeg not found")
         return False
+
+
+def run_watermark_with_softsub(input_path: str, output_path: str) -> bool:
+    """
+    Watermark the video AND preserve any embedded subtitle tracks as mov_text.
+    If subtitle conversion fails, falls back to plain watermark (no subs lost — just not muxed).
+    Returns True when output_path is ready to upload.
+    """
+    if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+        logger.error("Input file missing or empty: %s", input_path)
+        return False
+
+    drawtext = _build_drawtext()
+
+    # Try with subtitle track preservation
+    cmd_with_subs = [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-vf", drawtext,
+        "-c:v", "libx264",
+        "-crf", "23",
+        "-preset", "fast",
+        "-c:a", "copy",
+        "-c:s", "mov_text",
+        "-movflags", "+faststart",
+        "-metadata", "title=Tsukuyomi",
+        output_path,
+    ]
+    logger.info("ffmpeg watermark+softsub: %s", input_path)
+    try:
+        r = subprocess.run(cmd_with_subs, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=7200)
+        if r.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info("Watermark+softsub encode succeeded")
+            return True
+        logger.warning(
+            "Watermark+softsub failed (rc=%d), falling back to plain watermark:\n%s",
+            r.returncode, r.stderr.decode(errors="replace")[-400:],
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("ffmpeg watermark+softsub timed out")
+    except FileNotFoundError:
+        logger.error("ffmpeg not found on PATH")
+        return False
+
+    # Clean up any partial output and fall back to plain watermark
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+
+    return _run_ffmpeg(input_path, output_path)
+
+
+def run_watermark_with_hardsub(input_path: str, sub_path: str, output_path: str) -> bool:
+    """
+    Watermark the video AND burn the given subtitle file into the picture.
+    Uses the subtitle + drawtext filters in a single vf chain.
+    Returns True on success.
+    """
+    if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+        logger.error("Input file missing or empty: %s", input_path)
+        return False
+    if not os.path.exists(sub_path) or os.path.getsize(sub_path) == 0:
+        logger.error("Subtitle file missing or empty: %s", sub_path)
+        return False
+
+    drawtext = _build_drawtext()
+
+    _, ext = os.path.splitext(sub_path.lower())
+    if ext in (".ass", ".ssa"):
+        sub_filter = f"ass={sub_path}"
+    else:
+        # SRT / VTT — use subtitles filter
+        sub_filter = f"subtitles={sub_path}"
+
+    # Put subtitle burn-in BEFORE watermark so the text sits on top
+    vf = f"{sub_filter},{drawtext}"
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-crf", "23",
+        "-preset", "fast",
+        "-c:a", "copy",
+        "-sn",
+        "-movflags", "+faststart",
+        "-metadata", "title=Tsukuyomi",
+        output_path,
+    ]
+    logger.info("ffmpeg watermark+hardsub: %s + %s", input_path, sub_path)
+    try:
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=7200)
+        if r.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info("Watermark+hardsub encode succeeded")
+            return True
+        logger.warning(
+            "Watermark+hardsub failed (rc=%d):\n%s",
+            r.returncode, r.stderr.decode(errors="replace")[-500:],
+        )
+    except subprocess.TimeoutExpired:
+        logger.error("ffmpeg watermark+hardsub timed out")
+    except FileNotFoundError:
+        logger.error("ffmpeg not found on PATH")
+    return False
 
 
 async def apply_watermark_and_upload(
@@ -136,8 +237,9 @@ async def apply_watermark_and_upload(
     progress_cb=None,
 ) -> Tuple[Optional[int], Optional[str]]:
     """
-    Download → watermark (CRF 17 + drawtext) → faststart → upload.
+    Download → watermark (CRF 23 + drawtext) → faststart → upload.
     Returns (message_id, file_id) or (None, None) on failure.
+    All processing is done inside a TemporaryDirectory — nothing persists on disk.
     """
     loop = asyncio.get_event_loop()
 
