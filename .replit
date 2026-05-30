@@ -1,4 +1,4 @@
-modules = ["python-3.12", "web"]
+modules = ["python-3.12", "web", "bash"]
 [agent]
 expertMode = true
 stack = "BEST_EFFORT_FALLBACK"
@@ -34,3 +34,11 @@ outputType = "webview"
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[userenv]
+
+[userenv.shared]
+PORT = "5000"
+BIND_ADDRESS = "0.0.0.0"
+HAS_SSL = "true"
+NO_PORT = "1"

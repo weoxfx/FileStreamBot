@@ -30,9 +30,12 @@ class Server:
     PING_INTERVAL = int(env.get("PING_INTERVAL", "1200"))
     HAS_SSL = str(env.get("HAS_SSL", "0").lower()) in ("1", "true", "t", "yes", "y")
     NO_PORT = str(env.get("NO_PORT", "0").lower()) in ("1", "true", "t", "yes", "y")
-    FQDN = str(env.get("FQDN", BIND_ADDRESS))
+    _replit_domain = env.get("REPLIT_DEV_DOMAIN", "")
+    FQDN = str(env.get("FQDN", _replit_domain if _replit_domain else BIND_ADDRESS))
+    _use_ssl = HAS_SSL or bool(_replit_domain)
+    _no_port = NO_PORT or bool(_replit_domain)
     URL = "http{}://{}{}/".format(
-        "s" if HAS_SSL else "", FQDN, "" if NO_PORT else ":" + str(PORT)
+        "s" if _use_ssl else "", FQDN, "" if _no_port else ":" + str(PORT)
     )
 
 class Site:
