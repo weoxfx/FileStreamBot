@@ -1,6 +1,7 @@
 """
 AniList GraphQL API helpers.
 Improved search accuracy using multi-result scoring.
+Falls back to Kitsu API when AniList rate-limits or is unreachable.
 """
 
 import re
@@ -14,6 +15,7 @@ from rapidfuzz import fuzz
 logger = logging.getLogger(__name__)
 
 _URL = "https://graphql.anilist.co"
+_KITSU_URL = "https://kitsu.io/api/edge/anime"
 
 _FIELDS = """
     id
@@ -276,7 +278,18 @@ def _parse_media(media: dict) -> dict:
     }
 
 
+# ── AniList query with 429 handling ──────────────────────────────────────────
+
+_ANILIST_RATE_LIMITED = object()  # sentinel for rate-limit responses
+_MAX_RATE_LIMIT_RETRIES = 3
+_RATE_LIMIT_BASE_DELAY = 30  # seconds — AniList typically lifts limits quickly
+
+
 async def _query(payload: dict) -> Optional[dict]:
+    """
+    Execute a GraphQL query against AniList.
+    Returns the JSON response dict, None on error, or _ANILIST_RATE_LIMITED sentinel on 429.
+    """
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -288,6 +301,11 @@ async def _query(payload: dict) -> Optional[dict]:
                 },
                 timeout=aiohttp.ClientTimeout(total=12),
             ) as resp:
+
+                if resp.status == 429:
+                    retry_after = int(resp.headers.get("Retry-After", _RATE_LIMIT_BASE_DELAY))
+                    logger.warning("AniList rate limited (429). Retry-After: %ds", retry_after)
+                    return (_ANILIST_RATE_LIMITED, retry_after)
 
                 if resp.status != 200:
                     logger.warning(
@@ -327,24 +345,162 @@ async def _query(payload: dict) -> Optional[dict]:
         return None
 
 
-async def fetch_anime_by_id(anilist_id: int) -> Optional[dict]:
-    data = await _query({
-        "query": _BY_ID,
-        "variables": {
-            "id": anilist_id
-        }
-    })
+async def _query_with_retry(payload: dict) -> Optional[dict]:
+    """
+    Run an AniList query with automatic retry on 429.
+    Returns the data dict on success, None if all attempts fail,
+    or raises _ANILIST_RATE_LIMITED if rate limit persists.
+    """
+    for attempt in range(1, _MAX_RATE_LIMIT_RETRIES + 1):
+        result = await _query(payload)
 
-    if not data:
+        if result is None:
+            return None
+
+        if isinstance(result, tuple) and result[0] is _ANILIST_RATE_LIMITED:
+            _, wait_secs = result
+            # Cap wait to avoid blocking too long (max 60s per retry)
+            actual_wait = min(wait_secs, 60)
+            if attempt < _MAX_RATE_LIMIT_RETRIES:
+                logger.info(
+                    "AniList rate limit — waiting %ds (attempt %d/%d)…",
+                    actual_wait, attempt, _MAX_RATE_LIMIT_RETRIES
+                )
+                await asyncio.sleep(actual_wait)
+                continue
+            else:
+                logger.warning("AniList rate limit persisted after %d retries.", _MAX_RATE_LIMIT_RETRIES)
+                return _ANILIST_RATE_LIMITED  # signal caller to use fallback
+
+        return result
+
+    return None
+
+
+# ── Kitsu fallback ────────────────────────────────────────────────────────────
+
+def _parse_kitsu_item(item: dict) -> dict:
+    """Convert a Kitsu API anime item into our standard media dict."""
+    attrs = item.get("attributes") or {}
+    titles = attrs.get("titles") or {}
+
+    title = (
+        attrs.get("canonicalTitle")
+        or titles.get("en")
+        or titles.get("en_jp")
+        or titles.get("ja_jp")
+        or "Unknown"
+    ).strip()
+
+    poster = attrs.get("posterImage") or {}
+    cover_img = attrs.get("coverImage") or {}
+    cover_url = (
+        poster.get("large")
+        or poster.get("original")
+        or cover_img.get("large")
+        or ""
+    )
+
+    synopsis = re.sub(r"<[^>]+>", "", attrs.get("synopsis") or "").strip()
+
+    score = None
+    score_raw = attrs.get("averageRating")
+    if score_raw:
+        try:
+            score = int(float(score_raw))
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "anilist_id": None,
+        "mal_id": None,
+        "name": title,
+        "slug": make_slug(title),
+        "cover_url": cover_url,
+        "banner_url": "",
+        "synopsis": synopsis[:1000],
+        "total_episodes": attrs.get("episodeCount"),
+        "score": score,
+        "genres": [],
+        "status": attrs.get("status") or "",
+        "season": None,
+        "season_year": None,
+        "format": attrs.get("subtype"),
+    }
+
+
+def _score_kitsu_match(query: str, item: dict) -> int:
+    """Score a Kitsu item against a query string."""
+    attrs = item.get("attributes") or {}
+    titles = attrs.get("titles") or {}
+
+    all_titles = " ".join(filter(None, [
+        attrs.get("canonicalTitle"),
+        titles.get("en"),
+        titles.get("en_jp"),
+        titles.get("ja_jp"),
+    ])).lower()
+
+    return fuzz.token_sort_ratio(query.lower(), all_titles)
+
+
+async def _kitsu_search(name: str) -> Optional[dict]:
+    """Search Kitsu API and return the best-matching anime."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                _KITSU_URL,
+                params={"filter[text]": name, "page[limit]": "15"},
+                headers={"Accept": "application/vnd.api+json"},
+                timeout=aiohttp.ClientTimeout(total=12),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning("Kitsu returned HTTP %d for %r", resp.status, name)
+                    return None
+                data = await resp.json(content_type=None)
+    except Exception as e:
+        logger.warning("Kitsu request error: %s", e)
         return None
 
-    media = (data.get("data") or {}).get("Media")
+    items = (data.get("data") or [])
+    if not items:
+        logger.warning("Kitsu returned no results for %r", name)
+        return None
+
+    # Pick best match using fuzzy scoring
+    scored = [(
+        _score_kitsu_match(name, it), it
+    ) for it in items]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_item = scored[0]
+
+    logger.info(
+        "Kitsu fallback selected: %s (score=%d)",
+        (best_item.get("attributes") or {}).get("canonicalTitle", "?"),
+        best_score,
+    )
+
+    return _parse_kitsu_item(best_item)
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+async def fetch_anime_by_id(anilist_id: int) -> Optional[dict]:
+    result = await _query_with_retry({
+        "query": _BY_ID,
+        "variables": {"id": anilist_id}
+    })
+
+    # If rate-limited even after retries, nothing useful we can do for ID lookup
+    if result is _ANILIST_RATE_LIMITED or result is None:
+        if result is _ANILIST_RATE_LIMITED:
+            logger.warning("AniList rate limit for ID %s — no fallback for direct ID lookup.", anilist_id)
+        return None
+
+    media = (result.get("data") or {}).get("Media")
 
     if not media:
-        logger.warning(
-            "AniList ID %s not found",
-            anilist_id
-        )
+        logger.warning("AniList ID %s not found", anilist_id)
         return None
 
     return _parse_media(media)
@@ -353,6 +509,7 @@ async def fetch_anime_by_id(anilist_id: int) -> Optional[dict]:
 async def search_anime_by_name(name: str) -> Optional[dict]:
     """
     Multi-stage AniList search with scoring.
+    Falls back to Kitsu if AniList is rate-limited or fails.
     """
 
     sanitized = _sanitize_search(name)
@@ -363,6 +520,8 @@ async def search_anime_by_name(name: str) -> Optional[dict]:
     if simplified and simplified.lower() != sanitized.lower():
         candidates.append(simplified)
 
+    anilist_failed = False
+
     for attempt, query_name in enumerate(candidates, 1):
 
         logger.debug(
@@ -372,27 +531,28 @@ async def search_anime_by_name(name: str) -> Optional[dict]:
             query_name,
         )
 
-        data = await _query({
+        result = await _query_with_retry({
             "query": _BY_SEARCH,
-            "variables": {
-                "search": query_name
-            }
+            "variables": {"search": query_name}
         })
 
-        if not data:
+        if result is _ANILIST_RATE_LIMITED:
+            logger.warning("AniList rate limit persisted — switching to Kitsu fallback.")
+            anilist_failed = True
+            break
+
+        if not result:
+            anilist_failed = True
             continue
 
         media_list = (
-            ((data.get("data") or {}).get("Page") or {})
+            ((result.get("data") or {}).get("Page") or {})
             .get("media")
             or []
         )
 
         if not media_list:
-            logger.warning(
-                "AniList search %r returned no media",
-                query_name
-            )
+            logger.warning("AniList search %r returned no media", query_name)
             continue
 
         best = _pick_best_match(name, media_list)
@@ -400,9 +560,16 @@ async def search_anime_by_name(name: str) -> Optional[dict]:
         if best:
             return _parse_media(best)
 
-    logger.warning(
-        "All AniList search attempts failed for %r",
-        name
-    )
+    # ── Kitsu fallback ────────────────────────────────────────────────────────
+    if anilist_failed or True:  # also try Kitsu if AniList returned nothing useful
+        logger.info("Trying Kitsu fallback for %r", name)
+        kitsu_result = await _kitsu_search(sanitized)
+        if kitsu_result:
+            return kitsu_result
+        if simplified and simplified.lower() != sanitized.lower():
+            kitsu_result = await _kitsu_search(simplified)
+            if kitsu_result:
+                return kitsu_result
 
+    logger.warning("All AniList + Kitsu search attempts failed for %r", name)
     return None

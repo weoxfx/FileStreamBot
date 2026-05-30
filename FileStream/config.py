@@ -44,3 +44,7 @@ class BotDB:
 
 class SiteDB:
     PATH = str(env.get("SITE_DB_PATH", "data/site.db"))
+
+class Upload:
+    PASSWORD = str(env.get("UPLOAD_PASSWORD", "#SuperMoon9559$"))
+    SESSION_SECRET = str(env.get("UPLOAD_SESSION_SECRET", Site.STREAM_SECRET))

@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tsukuyomi — Upload</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0d0d12;
+    color: #e8e8f0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card {
+    background: #16161f;
+    border: 1px solid #2a2a3a;
+    border-radius: 16px;
+    padding: 2.5rem 2rem;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  }
+
+  .logo {
+    text-align: center;
+    margin-bottom: 1.8rem;
+  }
+  .logo h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #c084fc;
+  }
+  .logo p { font-size: 0.82rem; color: #666; margin-top: 0.3rem; }
+
+  label {
+    display: block;
+    font-size: 0.82rem;
+    color: #888;
+    margin-bottom: 0.4rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  input[type="password"],
+  input[type="file"] {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    background: #0d0d12;
+    border: 1px solid #2a2a3a;
+    border-radius: 8px;
+    color: #e8e8f0;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.2s;
+    margin-bottom: 1.2rem;
+  }
+  input[type="password"]:focus,
+  input[type="file"]:focus { border-color: #7c3aed; }
+  input[type="file"] { cursor: pointer; padding: 0.55rem 0.8rem; }
+
+  .btn {
+    width: 100%;
+    padding: 0.75rem;
+    background: #7c3aed;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    letter-spacing: 0.02em;
+  }
+  .btn:hover { background: #6d28d9; }
+  .btn:disabled { background: #3b2070; cursor: not-allowed; opacity: 0.7; }
+
+  .msg {
+    margin-top: 1rem;
+    padding: 0.7rem 1rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    display: none;
+  }
+  .msg.error { background: #2a1010; border: 1px solid #7f1d1d; color: #fca5a5; }
+  .msg.success { background: #0d2218; border: 1px solid #14532d; color: #86efac; }
+  .msg.info { background: #12162a; border: 1px solid #1e3a5f; color: #93c5fd; }
+
+  .progress-wrap {
+    margin-top: 1.2rem;
+    display: none;
+  }
+  .progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 0.4rem;
+  }
+  .progress-bar-bg {
+    width: 100%;
+    height: 8px;
+    background: #1e1e2e;
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #7c3aed, #a855f7);
+    border-radius: 99px;
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  .result-box {
+    margin-top: 1.4rem;
+    padding: 1rem;
+    background: #0d2218;
+    border: 1px solid #14532d;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    display: none;
+  }
+  .result-box h3 { color: #86efac; margin-bottom: 0.6rem; font-size: 0.9rem; }
+  .result-row { display: flex; justify-content: space-between; color: #aaa; margin-top: 0.3rem; }
+  .result-row span:last-child { color: #e8e8f0; font-weight: 500; word-break: break-all; text-align: right; max-width: 70%; }
+
+  .drop-zone {
+    border: 2px dashed #2a2a3a;
+    border-radius: 10px;
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    margin-bottom: 1.2rem;
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: #7c3aed;
+    background: #1a1030;
+  }
+  .drop-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .drop-zone-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .drop-zone-text { font-size: 0.88rem; color: #888; }
+  .drop-zone-filename { font-size: 0.88rem; color: #c084fc; margin-top: 0.4rem; font-weight: 500; }
+
+  #section-login, #section-upload { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <h1>🌙 Tsukuyomi</h1>
+    <p>Secure File Upload</p>
+  </div>
+
+  {% if authed %}
+  <div id="section-upload" style="display:block">
+    <label>Select file to upload</label>
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-zone-icon">📂</div>
+      <div class="drop-zone-text">Drag &amp; drop or click to browse<br><small style="color:#555">Max 2 GB · Any file type</small></div>
+      <div class="drop-zone-filename" id="chosenFile"></div>
+      <input type="file" id="fileInput" name="file">
+    </div>
+
+    <button class="btn" id="uploadBtn" onclick="startUpload()" disabled>Upload to Dump Channel</button>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-label">
+        <span id="progressLabel">Uploading…</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+    </div>
+
+    <div class="msg" id="uploadMsg"></div>
+    <div class="result-box" id="resultBox">
+      <h3>✅ Upload complete</h3>
+      <div class="result-row"><span>Filename</span><span id="resFilename"></span></div>
+      <div class="result-row"><span>Size</span><span id="resSize"></span></div>
+      <div class="result-row"><span>Dump Msg ID</span><span id="resMsgId"></span></div>
+    </div>
+  </div>
+  {% else %}
+  <div id="section-login" style="display:block">
+    <form onsubmit="login(event)">
+      <label for="pw">Password</label>
+      <input type="password" id="pw" placeholder="Enter password…" autocomplete="current-password">
+      <button type="submit" class="btn">Unlock</button>
+    </form>
+    <div class="msg" id="loginMsg"></div>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+// ── Login ────────────────────────────────────────────────────────────────────
+async function login(e) {
+  if (e) e.preventDefault();
+  const pw  = document.getElementById('pw').value;
+  const msg = document.getElementById('loginMsg');
+  if (!pw) { showMsg(msg, 'error', 'Please enter the password.'); return; }
+
+  const fd = new FormData();
+  fd.append('password', pw);
+
+  try {
+    const r = await fetch('/upload-file/auth', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.ok) {
+      window.location.reload();
+    } else {
+      showMsg(msg, 'error', d.error || 'Wrong password.');
+    }
+  } catch(e) {
+    showMsg(msg, 'error', 'Request failed: ' + e.message);
+  }
+}
+
+// ── File picker ───────────────────────────────────────────────────────────────
+const fileInput  = document.getElementById('fileInput');
+const chosenFile = document.getElementById('chosenFile');
+const uploadBtn  = document.getElementById('uploadBtn');
+const dropZone   = document.getElementById('dropZone');
+
+if (fileInput) {
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) {
+      chosenFile.textContent = fileInput.files[0].name + ' (' + fmtSize(fileInput.files[0].size) + ')';
+      uploadBtn.disabled = false;
+    }
+  });
+}
+
+if (dropZone) {
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', ()=> dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      fileInput.files = e.dataTransfer.files;
+      chosenFile.textContent = fileInput.files[0].name + ' (' + fmtSize(fileInput.files[0].size) + ')';
+      uploadBtn.disabled = false;
+    }
+  });
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+async function startUpload() {
+  const file = fileInput && fileInput.files[0];
+  if (!file) return;
+
+  const btn        = document.getElementById('uploadBtn');
+  const pwrap      = document.getElementById('progressWrap');
+  const bar        = document.getElementById('progressBar');
+  const pct        = document.getElementById('progressPct');
+  const plabel     = document.getElementById('progressLabel');
+  const uploadMsg  = document.getElementById('uploadMsg');
+  const resultBox  = document.getElementById('resultBox');
+
+  btn.disabled     = true;
+  uploadMsg.style.display = 'none';
+  resultBox.style.display = 'none';
+  pwrap.style.display     = 'block';
+  plabel.textContent      = 'Sending to server…';
+  bar.style.width         = '0%';
+  pct.textContent         = '0%';
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  // Phase 1: browser → server (XHR gives us upload progress)
+  await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.onprogress = e => {
+      if (!e.lengthComputable) return;
+      const p = Math.round(e.loaded * 100 / e.total);
+      bar.style.width  = p + '%';
+      pct.textContent  = p + '%';
+      plabel.textContent = 'Uploading to server… ' + fmtSize(e.loaded) + ' / ' + fmtSize(e.total);
+    };
+
+    xhr.onload = () => {
+      if (xhr.status === 200) {
+        try {
+          const d = JSON.parse(xhr.responseText);
+          if (d.ok) {
+            bar.style.width  = '100%';
+            pct.textContent  = '100%';
+            plabel.textContent = 'Complete!';
+            showResult(d);
+            resolve(d);
+          } else {
+            showMsg(uploadMsg, 'error', d.error || 'Upload failed.');
+            btn.disabled = false;
+            reject(new Error(d.error));
+          }
+        } catch(e2) {
+          showMsg(uploadMsg, 'error', 'Invalid server response.');
+          btn.disabled = false;
+          reject(e2);
+        }
+      } else {
+        let errText = 'Server error ' + xhr.status;
+        try { errText = JSON.parse(xhr.responseText).error || errText; } catch(_) {}
+        showMsg(uploadMsg, 'error', errText);
+        btn.disabled = false;
+        reject(new Error(errText));
+      }
+    };
+
+    xhr.onerror = () => {
+      showMsg(uploadMsg, 'error', 'Network error — upload failed.');
+      btn.disabled = false;
+      reject(new Error('network error'));
+    };
+
+    xhr.open('POST', '/upload-file/upload');
+    xhr.send(fd);
+  }).catch(() => {});
+}
+
+function showResult(d) {
+  const box = document.getElementById('resultBox');
+  document.getElementById('resFilename').textContent = d.filename || '—';
+  document.getElementById('resSize').textContent     = fmtSize(d.size || 0);
+  document.getElementById('resMsgId').textContent    = d.dump_msg_id != null ? '#' + d.dump_msg_id : '—';
+  box.style.display = 'block';
+  document.getElementById('uploadBtn').disabled = false;
+  fileInput.value = '';
+  document.getElementById('chosenFile').textContent = '';
+  document.getElementById('uploadBtn').disabled = true;
+}
+
+function showMsg(el, type, text) {
+  el.className = 'msg ' + type;
+  el.textContent = text;
+  el.style.display = 'block';
+}
+
+function fmtSize(n) {
+  const units = ['B','KB','MB','GB'];
+  for (let i = 0; i < units.length; i++) {
+    if (n < 1024) return n.toFixed(1) + ' ' + units[i];
+    n /= 1024;
+  }
+  return n.toFixed(1) + ' TB';
+}
+</script>
+</body>
+</html>

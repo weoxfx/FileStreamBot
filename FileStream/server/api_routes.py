@@ -15,10 +15,15 @@ API-key protected (X-API-Key header):
   GET /api/episodes/{anilist_id}[?episode=N]
   GET /api/qualities/{anilist_id}/{episode}
 """
+import os
 import time
 import math
 import json
+import hmac
+import secrets
+import hashlib
 import logging
+import tempfile
 import traceback
 
 import aiohttp
@@ -26,7 +31,7 @@ from aiohttp import web
 from aiohttp.http_exceptions import BadStatusLine
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from FileStream.config import Site, Telegram, Server
+from FileStream.config import Site, Telegram, Server, Upload
 from FileStream.utils import site_db, bot_db
 from FileStream.bot import multi_clients, work_loads, FileStream
 from FileStream import utils, StartTime, __version__
@@ -689,3 +694,194 @@ async def qualities_handler(request: web.Request):
         })
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
+
+
+# ── Upload page ─────────────────────────────────────────────────────────────────
+
+_UPLOAD_SESSION_TTL = 7 * 86400  # 7 days
+_UPLOAD_COOKIE = "tsuki_upload_sess"
+
+# In-progress uploads: upload_id -> {"phase": str, "pct": int, "done": bool, "result": dict}
+_upload_jobs: dict = {}
+
+
+def _make_upload_token() -> str:
+    ts    = str(int(time.time()))
+    nonce = secrets.token_hex(8)
+    payload = f"{ts}:{nonce}"
+    sig = hmac.new(
+        Upload.SESSION_SECRET.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    return f"{payload}:{sig}"
+
+
+def _verify_upload_token(token: str) -> bool:
+    try:
+        parts = token.split(":")
+        if len(parts) != 3:
+            return False
+        ts, nonce, sig = parts
+        payload = f"{ts}:{nonce}"
+        expected = hmac.new(
+            Upload.SESSION_SECRET.encode(), payload.encode(), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False
+        if time.time() - int(ts) > _UPLOAD_SESSION_TTL:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _is_upload_authed(request: web.Request) -> bool:
+    token = request.cookies.get(_UPLOAD_COOKIE, "")
+    return bool(token) and _verify_upload_token(token)
+
+
+@routes.get("/upload-file")
+async def upload_page(request: web.Request):
+    authed = _is_upload_authed(request)
+    tmpl = _jinja.get_template("upload.html")
+    html = tmpl.render(authed=authed)
+    return web.Response(text=html, content_type="text/html")
+
+
+@routes.post("/upload-file/auth")
+async def upload_auth(request: web.Request):
+    try:
+        data = await request.post()
+    except Exception:
+        return web.json_response({"error": "Bad request"}, status=400)
+
+    password = data.get("password", "")
+    if not hmac.compare_digest(password.encode(), Upload.PASSWORD.encode()):
+        return web.json_response({"error": "Wrong password"}, status=401)
+
+    token = _make_upload_token()
+    resp  = web.json_response({"ok": True})
+    resp.set_cookie(
+        _UPLOAD_COOKIE,
+        token,
+        max_age=_UPLOAD_SESSION_TTL,
+        httponly=True,
+        samesite="Strict",
+        path="/",
+    )
+    return resp
+
+
+@routes.post("/upload-file/upload")
+async def upload_file_handler(request: web.Request):
+    if not _is_upload_authed(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    if not Telegram.DUMP_CHANNEL:
+        return web.json_response({"error": "DUMP_CHANNEL not configured"}, status=503)
+
+    upload_id = secrets.token_hex(6)
+    _upload_jobs[upload_id] = {"phase": "receiving", "pct": 0, "done": False, "result": None}
+
+    try:
+        import re as _re
+        reader     = await request.multipart()
+        file_field = None
+        filename   = "upload"
+
+        async for part in reader:
+            if part.name == "file":
+                filename   = part.filename or "upload"
+                file_field = part
+                break
+
+        if file_field is None:
+            del _upload_jobs[upload_id]
+            return web.json_response({"error": "No file field in form"}, status=400)
+
+        safe_name  = _re.sub(r"[/\\]", "_", filename)
+        tmpdir_obj = tempfile.mkdtemp(prefix="tsuki_upload_")
+
+        try:
+            dest_path = os.path.join(tmpdir_obj, safe_name)
+            with open(dest_path, "wb") as f:
+                while True:
+                    chunk = await file_field.read_chunk(1 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+
+            file_size = os.path.getsize(dest_path)
+            _upload_jobs[upload_id]["phase"] = "uploading"
+            _upload_jobs[upload_id]["pct"]   = 0
+
+            _, client = _pick_client()
+            _last_t = [0.0]
+
+            def _progress(current, total):
+                now = time.time()
+                if now - _last_t[0] < 1.5:
+                    return
+                _last_t[0] = now
+                pct = int(current * 100 / total) if total else 0
+                _upload_jobs[upload_id]["pct"] = pct
+
+            sent = await client.send_document(
+                chat_id=Telegram.DUMP_CHANNEL,
+                document=dest_path,
+                file_name=safe_name,
+                caption=f"📎 Web upload: <b>{safe_name}</b> ({_fmt_size(file_size)})",
+                progress=_progress,
+            )
+
+            dump_msg_id = sent.id
+            _upload_jobs[upload_id].update({
+                "phase": "done", "pct": 100, "done": True,
+                "result": {
+                    "filename":    safe_name,
+                    "size":        file_size,
+                    "dump_msg_id": dump_msg_id,
+                },
+            })
+
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir_obj, ignore_errors=True)
+
+    except Exception as e:
+        logger.error("Web upload error: %s", e, exc_info=True)
+        if upload_id in _upload_jobs:
+            _upload_jobs[upload_id].update({"phase": "error", "done": True, "error": str(e)})
+        return web.json_response({"error": str(e)}, status=500)
+
+    result = _upload_jobs.pop(upload_id, {})
+    return web.json_response({
+        "ok":          True,
+        "filename":    (result.get("result") or {}).get("filename", ""),
+        "size":        (result.get("result") or {}).get("size", 0),
+        "dump_msg_id": (result.get("result") or {}).get("dump_msg_id"),
+    })
+
+
+@routes.get("/upload-file/progress/{upload_id}")
+async def upload_progress(request: web.Request):
+    if not _is_upload_authed(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    uid = request.match_info["upload_id"]
+    job = _upload_jobs.get(uid)
+    if not job:
+        return web.json_response({"error": "not found"}, status=404)
+    return web.json_response({
+        "phase":  job.get("phase", "unknown"),
+        "pct":    job.get("pct", 0),
+        "done":   job.get("done", False),
+        "result": job.get("result"),
+        "error":  job.get("error"),
+    })
+
+
+def _fmt_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
