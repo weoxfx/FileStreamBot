@@ -37,7 +37,7 @@ search_anime() {
         -X POST "${API}/api" \
         --data "{\"variables\":{\"search\":{\"allowAdult\":false,\"allowUnknown\":false,\"query\":\"${query}\"},\"limit\":40,\"page\":1,\"translationType\":\"${MODE}\",\"countryOrigin\":\"ALL\"},\"query\":\"${gql}\"}" \
     | sed 's/},{/\n/g' \
-    | sed -nE "s|.*\"_id\":\"([^\"]+)\".*\"name\":\"([^\"]+)\".*\"${MODE}\":([1-9][0-9]*).*|\1|\2 (\3 episodes)|p" \
+    | sed -nE "s@.*\"_id\":\"([^\"]+)\".*\"name\":\"([^\"]+)\".*\"${MODE}\":([1-9][0-9]*).*@\1|\2 (\3 episodes)@p" \
     | sed 's/\\\"//g'
 }
 
