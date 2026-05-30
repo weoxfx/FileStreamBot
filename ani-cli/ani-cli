@@ -96,9 +96,9 @@ get_links() {
             printf '%s' "$resp" \
                 | sed 's/},{/\n/g' \
                 | sed -nE 's|.*"link":"([^"]*)".*"resolutionStr":"([^"]*)".*|\2 >\1|p;
-                            s|.*"hls","url":"([^"]*)".*"hardsub_lang":"en-US".*|\1|p'
-            # handle m3u8 master playlists
-            m3u8_url="$(printf '%s' "$resp" | sed -nE 's|.*"hls","url":"([^"]*)".*|\1|p' | head -1)"
+                            s|.*"hls","url":"([^"]*)".*"hardsub_lang":"en-US".*|HSUB >\1|p'
+            # handle m3u8 master playlists (soft-sub only)
+            m3u8_url="$(printf '%s' "$resp" | sed -nE 's|.*"hls","url":"([^"]*)".*hardsub_lang.*||;s|.*"hls","url":"([^"]*)".*|\1|p' | head -1)"
             if [ -n "$m3u8_url" ] && printf '%s' "$m3u8_url" | grep -q 'master.m3u8'; then
                 m3u8_refr="$(printf '%s' "$resp" | sed -nE 's|.*"Referer":"([^"]*)".*|\1|p')"
                 rel="$(printf '%s' "$m3u8_url" | sed 's|[^/]*$||')"
@@ -160,16 +160,43 @@ get_episode_url() {
 
     [ -z "$ALL_LINKS" ] && die "No video links found for episode ${EP_NO}"
 
+    # Filter by sub type (set by bot via ANI_CLI_SUB_TYPE; default: sub)
+    # HSUB lines are tagged "HSUB >url"; regular soft-sub lines are "RES >url"
+    _SUB_TYPE="${ANI_CLI_SUB_TYPE:-sub}"
+    case "$_SUB_TYPE" in
+        hsub)
+            _HSUB="$(printf '%s\n' "$ALL_LINKS" | grep '^HSUB >')"
+            if [ -n "$_HSUB" ]; then
+                ALL_LINKS="$_HSUB"
+                log "Using hardsub links (${_SUB_TYPE})"
+            else
+                log "Warning: no hardsub links found — using all available links as fallback"
+                ALL_LINKS="$(printf '%s\n' "$ALL_LINKS" | grep -v '^HSUB ')"
+            fi
+            ;;
+        dub)
+            # dub mode: MODE=dub already set; remove any hardsub tags just in case
+            ALL_LINKS="$(printf '%s\n' "$ALL_LINKS" | grep -v '^HSUB ')"
+            ;;
+        *)
+            # sub (softsub): exclude hardsub-tagged lines
+            _SOFT="$(printf '%s\n' "$ALL_LINKS" | grep -v '^HSUB >')"
+            [ -n "$_SOFT" ] && ALL_LINKS="$_SOFT"
+            ;;
+    esac
+
+    [ -z "$ALL_LINKS" ] && die "No video links found for episode ${EP_NO} (sub_type=${_SUB_TYPE})"
+
     # Select quality
     case "$QUALITY" in
-        best)  EPISODE="$(printf '%s' "$ALL_LINKS" | head -1 | cut -d'>' -f2)" ;;
-        worst) EPISODE="$(printf '%s' "$ALL_LINKS" | grep -E '^[0-9]' | tail -1 | cut -d'>' -f2)" ;;
-        *)     EPISODE="$(printf '%s' "$ALL_LINKS" | grep -m1 "$QUALITY" | cut -d'>' -f2)" ;;
+        best)  EPISODE="$(printf '%s\n' "$ALL_LINKS" | head -1 | cut -d'>' -f2 | sed 's/^ //')" ;;
+        worst) EPISODE="$(printf '%s\n' "$ALL_LINKS" | grep -E '^[0-9]' | tail -1 | cut -d'>' -f2 | sed 's/^ //')" ;;
+        *)     EPISODE="$(printf '%s\n' "$ALL_LINKS" | grep -m1 "$QUALITY" | cut -d'>' -f2 | sed 's/^ //')" ;;
     esac
 
     [ -z "$EPISODE" ] && {
         log "Quality ${QUALITY} not found, falling back to best"
-        EPISODE="$(printf '%s' "$ALL_LINKS" | head -1 | cut -d'>' -f2)"
+        EPISODE="$(printf '%s\n' "$ALL_LINKS" | head -1 | cut -d'>' -f2 | sed 's/^ //')"
     }
     [ -z "$EPISODE" ] && die "Could not select episode URL"
 
