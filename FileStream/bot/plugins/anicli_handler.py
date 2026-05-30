@@ -36,10 +36,7 @@ from FileStream.utils.anilist import fetch_anime_by_id
 
 logger = logging.getLogger(__name__)
 
-_ANICLI_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "ani-cli", "ani-cli"
-)
+_ANICLI_PATH = os.path.abspath(os.path.join("ani-cli", "ani-cli"))
 
 _VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".flv"}
 

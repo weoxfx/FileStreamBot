@@ -61,6 +61,8 @@ def _run_ffmpeg(input_path: str, output_path: str) -> bool:
     wm_cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
+        "-map", "0:v:0",
+        "-map", "0:a?",
         "-vf", drawtext,
         "-c:v", "libx264",
         "-crf", "23",
@@ -133,10 +135,15 @@ def run_watermark_with_softsub(input_path: str, output_path: str) -> bool:
 
     drawtext = _build_drawtext()
 
-    # Try with subtitle track preservation
+    # Try with subtitle track preservation.
+    # Explicit -map flags prevent embedded ASS/SSA streams from being pulled
+    # into the video filter pipeline (which would cause accidental burn-in).
     cmd_with_subs = [
         "ffmpeg", "-y",
         "-i", input_path,
+        "-map", "0:v:0",
+        "-map", "0:a?",
+        "-map", "0:s?",
         "-vf", drawtext,
         "-c:v", "libx264",
         "-crf", "23",
