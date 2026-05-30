@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     fzf \
+    aria2c \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
