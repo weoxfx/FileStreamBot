@@ -33,77 +33,6 @@ _ANICLI_PATH = os.path.abspath(os.path.join("ani-cli", "ani-cli"))
 _VIDEO_EXTS  = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".flv"}
 _MAX_FLOOD_RETRIES = 3
 
-# Build the widest possible PATH for ani-cli subprocesses.
-#
-# Strategy: merge three sources so we never accidentally drop a path:
-#   1. Current process PATH  (set by Docker ENV / systemd / Nix profile)
-#   2. Login-shell PATH      (bash -lc sources /etc/profile.d/*, Nix nix-daemon.sh, etc.)
-#   3. Hard-coded fallbacks  (always include standard Linux bin dirs)
-#
-# We MERGE rather than replace so that Docker containers (which set PATH
-# via ENV and don't have Nix login-shell files) and Nix/Replit environments
-# (which need the /nix/store/.../bin entries) both work correctly.
-
-_FALLBACK_BINS = [
-    "/usr/local/bin", "/usr/bin", "/bin",
-    "/usr/local/sbin", "/usr/sbin", "/sbin",
-]
-
-def _build_merged_path() -> str:
-    parts: list[str] = []
-    seen: set[str] = set()
-
-    def _add(segment: str) -> None:
-        for p in segment.split(":"):
-            p = p.strip()
-            if p and p not in seen:
-                seen.add(p)
-                parts.append(p)
-
-    # 1. Current process PATH
-    _add(os.environ.get("PATH", ""))
-
-    # 2. Login-shell PATH (may add /nix/store paths or /etc/profile.d extras)
-    try:
-        r = subprocess.run(
-            ["bash", "-lc", "echo $PATH"],
-            capture_output=True, text=True, timeout=8,
-        )
-        if r.returncode == 0:
-            _add(r.stdout.strip())
-    except Exception:
-        pass
-
-    # 3. Hard-coded fallbacks
-    for d in _FALLBACK_BINS:
-        _add(d)
-
-    return ":".join(parts)
-
-
-_MERGED_PATH = _build_merged_path()
-logger.info("ani-cli effective PATH: %s", _MERGED_PATH)
-
-# Verify curl is reachable via the merged PATH — fail loudly at startup rather
-# than silently inside a /fetch job.
-try:
-    _ct = subprocess.run(
-        ["curl", "--version"],
-        capture_output=True, text=True, timeout=5,
-        env={"PATH": _MERGED_PATH},
-    )
-    if _ct.returncode == 0:
-        logger.info("curl OK: %s", _ct.stdout.splitlines()[0])
-    else:
-        logger.warning("curl returned non-zero on --version: %s", _ct.stderr[:200])
-except FileNotFoundError:
-    logger.error(
-        "curl NOT FOUND in merged PATH.  "
-        "Install curl in the Docker image or add its directory to PATH.  "
-        "Merged PATH was: %s",
-        _MERGED_PATH,
-    )
-
 
 def _safe_hashtag(slug: str) -> str:
     return re.sub(r"[^\w]", "_", slug, flags=re.ASCII)
@@ -159,7 +88,6 @@ async def _do_one_fetch(
     """
     Download one episode via ani-cli, watermark it, upload to dump channel,
     save to DB. Returns the stream_token on success, None on failure.
-    Updates status_msg with progress throughout.
     """
     loop = asyncio.get_event_loop()
     dump_msg_id = None
@@ -169,11 +97,12 @@ async def _do_one_fetch(
         with tempfile.TemporaryDirectory(prefix="tsuki_fetch_") as tmpdir:
             env = os.environ.copy()
             env["HOME"] = tmpdir
-            # Use the pre-built merged PATH (current + login-shell + fallbacks)
-            # so curl/ffmpeg are always found in both Docker and Nix/Replit.
-            env["PATH"] = _MERGED_PATH
+            env["ANI_CLI_DOWNLOAD_DIR"] = tmpdir
+            env["ANI_CLI_QUALITY"] = quality
+            env["ANI_CLI_MODE"] = "sub"
 
             cmd = ["bash", _ANICLI_PATH, "-d", "-e", str(episode), anime_name]
+            logger.info("ani-cli cmd: %s", " ".join(cmd))
 
             try:
                 proc = await asyncio.wait_for(
@@ -197,11 +126,16 @@ async def _do_one_fetch(
                 )
                 return None
 
+            stderr_out = proc.stderr.decode(errors="replace")
+            stdout_out = proc.stdout.decode(errors="replace")
+            logger.info("ani-cli stdout: %s", stdout_out[-500:])
+            if stderr_out:
+                logger.info("ani-cli stderr: %s", stderr_out[-500:])
+
             if proc.returncode != 0:
-                stderr_tail = proc.stderr.decode(errors="replace")[-800:]
                 await status_msg.edit_text(
-                    f"❌ <b>ani-cli download failed for E{episode:02d}.</b>\n\n"
-                    f"<code>{stderr_tail}</code>",
+                    f"❌ <b>ani-cli failed for E{episode:02d}.</b>\n\n"
+                    f"<code>{stderr_out[-600:]}</code>",
                     parse_mode=ParseMode.HTML,
                 )
                 return None
@@ -209,7 +143,8 @@ async def _do_one_fetch(
             dl_path = _find_downloaded_file(tmpdir)
             if not dl_path:
                 await status_msg.edit_text(
-                    f"❌ <b>E{episode:02d}: ani-cli ran but no video file was found.</b>",
+                    f"❌ <b>E{episode:02d}: ani-cli ran but no video file was found.</b>\n\n"
+                    f"<code>{stdout_out[-300:]}</code>",
                     parse_mode=ParseMode.HTML,
                 )
                 return None
@@ -284,7 +219,7 @@ async def _do_one_fetch(
     )
 
 
-# ── /fetch ────────────────────────────────────────────────────────────────────
+# ── /fetch ─────────────────────────────────────────────────────────────────────
 
 @FileStream.on_message(
     filters.private
@@ -413,7 +348,7 @@ async def fetch_handler(bot: Client, message: Message):
     )
 
 
-# ── /batch ────────────────────────────────────────────────────────────────────
+# ── /batch ─────────────────────────────────────────────────────────────────────
 
 @FileStream.on_message(
     filters.private
@@ -447,10 +382,18 @@ async def batch_handler(bot: Client, message: Message):
         return
 
     if start_ep < 1 or start_ep > end_ep:
-        await message.reply_text("❌ <b>start_ep must be ≥ 1 and ≤ end_ep.</b>", parse_mode=ParseMode.HTML, quote=True)
+        await message.reply_text(
+            "❌ <b>start_ep must be ≥ 1 and ≤ end_ep.</b>",
+            parse_mode=ParseMode.HTML,
+            quote=True,
+        )
         return
     if end_ep - start_ep >= 50:
-        await message.reply_text("❌ <b>Max 50 episodes per batch.</b>", parse_mode=ParseMode.HTML, quote=True)
+        await message.reply_text(
+            "❌ <b>Max 50 episodes per batch.</b>",
+            parse_mode=ParseMode.HTML,
+            quote=True,
+        )
         return
 
     quality = args[3] if len(args) >= 4 else "1080p"
