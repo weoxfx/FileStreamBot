@@ -33,18 +33,76 @@ _ANICLI_PATH = os.path.abspath(os.path.join("ani-cli", "ani-cli"))
 _VIDEO_EXTS  = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".flv"}
 _MAX_FLOOD_RETRIES = 3
 
-# Capture the full login-shell PATH once at import time.
-# The workflow process may start with a stripped-down PATH that is missing the
-# Nix store bin directory where curl, ffmpeg, etc. actually live.
-# Running bash -lc sources all profile files and gives us the complete PATH.
+# Build the widest possible PATH for ani-cli subprocesses.
+#
+# Strategy: merge three sources so we never accidentally drop a path:
+#   1. Current process PATH  (set by Docker ENV / systemd / Nix profile)
+#   2. Login-shell PATH      (bash -lc sources /etc/profile.d/*, Nix nix-daemon.sh, etc.)
+#   3. Hard-coded fallbacks  (always include standard Linux bin dirs)
+#
+# We MERGE rather than replace so that Docker containers (which set PATH
+# via ENV and don't have Nix login-shell files) and Nix/Replit environments
+# (which need the /nix/store/.../bin entries) both work correctly.
+
+_FALLBACK_BINS = [
+    "/usr/local/bin", "/usr/bin", "/bin",
+    "/usr/local/sbin", "/usr/sbin", "/sbin",
+]
+
+def _build_merged_path() -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+
+    def _add(segment: str) -> None:
+        for p in segment.split(":"):
+            p = p.strip()
+            if p and p not in seen:
+                seen.add(p)
+                parts.append(p)
+
+    # 1. Current process PATH
+    _add(os.environ.get("PATH", ""))
+
+    # 2. Login-shell PATH (may add /nix/store paths or /etc/profile.d extras)
+    try:
+        r = subprocess.run(
+            ["bash", "-lc", "echo $PATH"],
+            capture_output=True, text=True, timeout=8,
+        )
+        if r.returncode == 0:
+            _add(r.stdout.strip())
+    except Exception:
+        pass
+
+    # 3. Hard-coded fallbacks
+    for d in _FALLBACK_BINS:
+        _add(d)
+
+    return ":".join(parts)
+
+
+_MERGED_PATH = _build_merged_path()
+logger.info("ani-cli effective PATH: %s", _MERGED_PATH)
+
+# Verify curl is reachable via the merged PATH — fail loudly at startup rather
+# than silently inside a /fetch job.
 try:
-    _r = subprocess.run(
-        ["bash", "-lc", "echo $PATH"],
-        capture_output=True, text=True, timeout=8,
+    _ct = subprocess.run(
+        ["curl", "--version"],
+        capture_output=True, text=True, timeout=5,
+        env={"PATH": _MERGED_PATH},
     )
-    _LOGIN_SHELL_PATH = _r.stdout.strip() if _r.returncode == 0 else ""
-except Exception:
-    _LOGIN_SHELL_PATH = ""
+    if _ct.returncode == 0:
+        logger.info("curl OK: %s", _ct.stdout.splitlines()[0])
+    else:
+        logger.warning("curl returned non-zero on --version: %s", _ct.stderr[:200])
+except FileNotFoundError:
+    logger.error(
+        "curl NOT FOUND in merged PATH.  "
+        "Install curl in the Docker image or add its directory to PATH.  "
+        "Merged PATH was: %s",
+        _MERGED_PATH,
+    )
 
 
 def _safe_hashtag(slug: str) -> str:
@@ -111,9 +169,9 @@ async def _do_one_fetch(
         with tempfile.TemporaryDirectory(prefix="tsuki_fetch_") as tmpdir:
             env = os.environ.copy()
             env["HOME"] = tmpdir
-            # Use the full login-shell PATH so curl/ffmpeg are always found.
-            if _LOGIN_SHELL_PATH:
-                env["PATH"] = _LOGIN_SHELL_PATH
+            # Use the pre-built merged PATH (current + login-shell + fallbacks)
+            # so curl/ffmpeg are always found in both Docker and Nix/Replit.
+            env["PATH"] = _MERGED_PATH
 
             cmd = ["bash", _ANICLI_PATH, "-d", "-e", str(episode), anime_name]
 
