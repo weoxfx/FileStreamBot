@@ -341,7 +341,7 @@ video{position:absolute;inset:0;width:100%;height:100%;
   <!-- Episode info HUD (top, fades with controls) -->
   <div id="ep-hud">
     <div class="hud-name">{{ anime_name }}</div>
-    <div class="hud-ep">Episode {{ episode }}{% if audio_type %} · {{ audio_type | upper }}{% endif %}</div>
+    <div class="hud-ep" id="hud-ep">Episode {{ episode }}{% if audio_type %} · {{ audio_type | upper }}{% endif %}</div>
   </div>
 
   <!-- Mute banner (shown until user interacts) -->
@@ -818,6 +818,7 @@ class Player {
     this._rafPending= false;
     this._resumeDone= false;
 
+    this._nativeTracksSetup = false;
     this._buildQ();
     this._bindVideo();
     this._bindSeek();
@@ -842,6 +843,54 @@ class Player {
     // Hard-subbed episodes have subs burned in — hide CC button entirely
     if(ED.audio_type==='hsub'){
       $('btn-cc').style.display='none';
+    }
+
+    // Detect embedded subtitle tracks in the video stream (mov_text in MP4).
+    // Suppress native browser rendering so we control display via the CC panel.
+    if(ED.audio_type!=='hsub'){
+      this.V.addEventListener('loadedmetadata',()=>{
+        if(this._nativeTracksSetup)return;
+        const tracks=Array.from(this.V.textTracks||[])
+          .filter(t=>t.kind==='subtitles'||t.kind==='captions');
+        if(tracks.length===0)return;
+        this._nativeTracksSetup=true;
+        // Suppress native rendering — we'll control via mode
+        tracks.forEach(t=>{t.mode='hidden';});
+        // Only register if no stored VTT tracks are already loaded
+        if(CCM.tracks.length===0){
+          const sel=$('cc-track');
+          // Remove stale native options (e.g. after quality switch)
+          sel.querySelectorAll('option[data-native]').forEach(o=>o.remove());
+          tracks.forEach((t,i)=>{
+            const o=document.createElement('option');
+            o.value='n'+i;
+            o.dataset.native='1';
+            o.textContent=t.label||(t.language?t.language.toUpperCase():('Track '+(i+1)));
+            sel.appendChild(o);
+          });
+          // Override cc-track onchange to handle native tracks alongside CCM
+          const prevOnChange=sel.onchange;
+          sel.onchange=e=>{
+            const v=e.target.value;
+            if(v==='-1'){
+              tracks.forEach(t=>t.mode='hidden');
+              $('sub-txt').innerHTML='';
+            }else if(v[0]==='n'){
+              tracks.forEach((t,i)=>{t.mode=(i===+v.slice(1)?'showing':'hidden');});
+            }else{
+              if(prevOnChange)prevOnChange.call(sel,e);
+              tracks.forEach(t=>t.mode='hidden');
+            }
+          };
+          $('btn-cc').classList.add('has-tracks');
+          if(!this.ccOn){
+            this.ccOn=true;
+            $('btn-cc').classList.add('on');
+            tracks[0].mode='showing';
+            sel.value='n0';
+          }
+        }
+      });
     }
 
     emit('ready',{episode:ED,qualities:this.qualities});
@@ -927,28 +976,50 @@ class Player {
   _buildQ(){
     const dd=$('q-dd');
     dd.innerHTML='';
-    this.qualities.forEach((q,i)=>{
+    // Only show qualities matching the current audio type — no audio-type badge shown.
+    // Map each entry to its original index so setQuality(origIdx) still works.
+    const curType=ED.audio_type||'';
+    const mapped=this.qualities.map((q,i)=>({...q,_idx:i}));
+    const list=(curType
+      ? mapped.filter(q=>q.audio_type===curType)
+      : mapped
+    );
+    // Fall back to full list if filter leaves nothing (shouldn't happen in practice)
+    const display=list.length>0?list:mapped;
+    display.forEach(q=>{
       const el=document.createElement('div');
-      el.className='qi'+(i===this.qIdx?' cur':'');
+      el.className='qi'+(q._idx===this.qIdx?' cur':'');
       el.innerHTML=
         `<span>${q.quality.toUpperCase()}</span>`+
-        `<span class="qb">${q.audio_type}</span>`+
         `<svg class="qi-chk" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`;
       el.addEventListener('click',e=>{
         e.stopPropagation();
-        this.setQuality(i);
+        this.setQuality(q._idx);
         dd.classList.remove('open');
       });
       dd.appendChild(el);
     });
     const q=this.qualities[this.qIdx];
     $('q-lbl').textContent=q?q.quality.toUpperCase():'—';
+    // Keep HUD episode line in sync with selected quality
+    this._updateHud();
+  }
+
+  _updateHud(){
+    const el=$('hud-ep');
+    if(!el)return;
+    const q=(this.qualities[this.qIdx]||{}).quality;
+    const type=ED.audio_type?(' · '+ED.audio_type.toUpperCase()):'';
+    const qual=q?(' · '+q.toUpperCase()):'';
+    el.textContent='Episode '+ED.episode+type+qual;
   }
 
   _loadSrc(idx,initial=false){
     const q=this.qualities[idx];
     if(!q)return;
     const t=this.V.currentTime,wasPaused=this.V.paused;
+    // Reset native track detection so it runs again after the new source loads
+    this._nativeTracksSetup=false;
     this.V.src=BASE+'/stream/'+q.stream_token;
     this.V.load();
     if(!initial){
