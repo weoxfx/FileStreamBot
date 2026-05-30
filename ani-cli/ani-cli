@@ -291,14 +291,17 @@ fi
 
 # ── Episode list ───────────────────────────────────────────────────────────────
 
-EP_LIST="$(episodes_list "$SHOW_ID")"
-[ -z "$EP_LIST" ] && die "No episodes found for show ID: ${SHOW_ID}"
-
-log "Available episodes: $(printf '%s' "$EP_LIST" | tr '\n' ' ')"
-
-# Validate that the requested episode exists
-if ! printf '%s\n' "$EP_LIST" | grep -qx "$EP_NO"; then
-    log "Warning: episode ${EP_NO} not in episode list — attempting anyway"
+# Episode list validation — skipped when bot pre-resolved the show ID
+# (Python already validated; shell sed JSON parsing is unreliable for large shows)
+if [ -z "${ANI_CLI_SHOW_ID:-}" ]; then
+    EP_LIST="$(episodes_list "$SHOW_ID")"
+    [ -z "$EP_LIST" ] && die "No episodes found for show ID: ${SHOW_ID}"
+    log "Available episodes: $(printf '%s' "$EP_LIST" | tr '\n' ' ')"
+    if ! printf '%s\n' "$EP_LIST" | grep -qx "$EP_NO"; then
+        log "Warning: episode ${EP_NO} not in episode list — attempting anyway"
+    fi
+else
+    log "Skipping episode list validation (show ID pre-resolved by bot)"
 fi
 
 # ── Fetch & download ───────────────────────────────────────────────────────────
