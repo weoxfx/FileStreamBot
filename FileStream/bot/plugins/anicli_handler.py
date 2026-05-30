@@ -20,6 +20,7 @@ import os
 import re
 import asyncio
 import logging
+import shutil
 import tempfile
 import subprocess
 
@@ -180,6 +181,17 @@ async def fetch_handler(bot: Client, message: Message):
             # ── Run ani-cli in tmpdir to download the episode ─────────────────
             env = os.environ.copy()
             env["HOME"] = tmpdir  # isolate ani-cli history/state
+
+            # Ensure all required tools are on PATH — the workflow process may
+            # have a leaner PATH than the interactive shell, missing Nix store
+            # bin dirs where curl/ffmpeg/etc. actually live.
+            _extra_dirs = set()
+            for _tool in ("curl", "ffmpeg", "fzf", "mpv", "aria2c", "wget"):
+                _p = shutil.which(_tool)
+                if _p:
+                    _extra_dirs.add(os.path.dirname(_p))
+            if _extra_dirs:
+                env["PATH"] = ":".join(_extra_dirs) + ":" + env.get("PATH", "")
 
             cmd = [
                 "bash", _ANICLI_PATH,
