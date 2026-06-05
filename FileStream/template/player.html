@@ -912,7 +912,10 @@ class Player {
     }
     // Restore last-used quality by resolution string (persists across episodes)
     if(p.quality&&this.qualities.length>0){
-      const qi=this.qualities.findIndex(q=>q.quality===p.quality);
+      const qi = this.qualities.findIndex(q =>
+        q.quality === p.quality &&
+        (!ED.audio_type || q.audio_type === ED.audio_type)
+                                         );
       if(qi>0){
         this.qIdx=qi;
         this._loadSrc(qi,true);
