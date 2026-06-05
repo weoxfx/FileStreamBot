@@ -976,21 +976,18 @@ class Player {
   _buildQ(){
     const dd=$('q-dd');
     dd.innerHTML='';
-    // Only show qualities matching the current audio type — no audio-type badge shown.
-    // Map each entry to its original index so setQuality(origIdx) still works.
-    const curType=ED.audio_type||'';
+    // Show all qualities; show audio-type badge whenever multiple types exist.
     const mapped=this.qualities.map((q,i)=>({...q,_idx:i}));
-    const list=(curType
-      ? mapped.filter(q=>q.audio_type===curType)
-      : mapped
-    );
-    // Fall back to full list if filter leaves nothing (shouldn't happen in practice)
-    const display=list.length>0?list:mapped;
-    display.forEach(q=>{
+    const types=new Set(mapped.map(q=>q.audio_type));
+    const showBadge=types.size>1;
+    mapped.forEach(q=>{
       const el=document.createElement('div');
       el.className='qi'+(q._idx===this.qIdx?' cur':'');
+      const badge=showBadge
+        ?`<span class="qb">${(q.audio_type||'').toUpperCase()}</span>`
+        :'';
       el.innerHTML=
-        `<span>${q.quality.toUpperCase()}</span>`+
+        `<span>${q.quality.toUpperCase()}</span>${badge}`+
         `<svg class="qi-chk" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>`;
       el.addEventListener('click',e=>{
         e.stopPropagation();
@@ -1000,7 +997,8 @@ class Player {
       dd.appendChild(el);
     });
     const q=this.qualities[this.qIdx];
-    $('q-lbl').textContent=q?q.quality.toUpperCase():'—';
+    const curBadge=(showBadge&&q)?` · ${(q.audio_type||'').toUpperCase()}`:'';
+    $('q-lbl').textContent=q?(q.quality.toUpperCase()+curBadge):'—';
     // Keep HUD episode line in sync with selected quality
     this._updateHud();
   }
@@ -1679,9 +1677,13 @@ class Player {
 
   setQuality(idx){
     if(idx<0||idx>=this.qualities.length)return;
-    this.qIdx=idx;this._loadSrc(idx);
+    this.qIdx=idx;
+    // Sync ED.audio_type so HUD and badge stay correct when switching Sub↔Dub
+    if(this.qualities[idx].audio_type)ED.audio_type=this.qualities[idx].audio_type;
+    this._loadSrc(idx);
     Cache.savePrefs({quality:this.qualities[idx].quality});
-    toast('Quality: '+this.qualities[idx].quality.toUpperCase());
+    const at=this.qualities[idx].audio_type?(' · '+(this.qualities[idx].audio_type).toUpperCase()):'';
+    toast('Quality: '+this.qualities[idx].quality.toUpperCase()+at);
   }
 
   setAutoskip(v){this.autoskip=!!v;$('tog-skip').className='tog'+(v?' on':'');Cache.savePrefs({skip_auto:!!v});}
