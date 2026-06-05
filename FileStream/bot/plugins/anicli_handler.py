@@ -564,7 +564,9 @@ async def batch_handler(bot: Client, message: Message):
                 pass
             continue
 
-        ep_ok = False
+        # sub_ok / dub_ok start True when that type is not required
+        sub_ok = not need_sub
+        dub_ok = not need_dub
 
         # SUB
         if need_sub:
@@ -583,9 +585,7 @@ async def batch_handler(bot: Client, message: Message):
             )
             if tok:
                 done_sub.append((episode, tok))
-                ep_ok = True
-            else:
-                failed.append(episode)
+                sub_ok = True
 
         # DUB
         if need_dub:
@@ -605,10 +605,11 @@ async def batch_handler(bot: Client, message: Message):
                 )
                 if tok:
                     done_dub.append((episode, tok))
+                    dub_ok = True
             except Exception as e:
                 logger.warning("DUB fetch failed for E%02d — skipping: %s", episode, e)
 
-        if not ep_ok and episode not in failed:
+        if not (sub_ok and dub_ok):
             failed.append(episode)
 
     lines = [
