@@ -18,3 +18,13 @@ python-dotenv
 rapidfuzz
 requests
 tgcrypto
+aiofiles
+aiohttp
+aiosqlite
+dnspython
+jinja2
+pyrofork
+python-dotenv
+rapidfuzz
+requests
+tgcrypto
